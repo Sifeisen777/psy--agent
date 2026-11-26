@@ -27,4 +27,9 @@ public class MockAiChatFacade implements AiChatFacade {
                 + "你刚才说：「" + message + "」\n"
                 + "配置 Key 后即可获得真实回复：在 psy-bootstrap/src/main/resources/application-local.yml 中设置 psy.ai.api-key。";
     }
+
+    @Override
+    public ProbeResult probe() {
+        return ProbeResult.mock();
+    }
 }

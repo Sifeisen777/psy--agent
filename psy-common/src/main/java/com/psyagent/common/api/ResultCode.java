@@ -17,9 +17,12 @@ public enum ResultCode {
 
     INTERNAL_ERROR(50000, "系统繁忙，请稍后重试"),
 
+    RATE_LIMITED(42900, "请求过于频繁，请稍后再试"),
+
     AI_UNAVAILABLE(60001, "AI 服务不可用"),
     AI_TIMEOUT(60002, "AI 响应超时"),
-    AI_OUTPUT_INVALID(60003, "AI 输出格式不合法");
+    AI_OUTPUT_INVALID(60003, "AI 输出格式不合法"),
+    AI_AUTH_FAILED(60004, "模型鉴权失败，请检查 API Key");
 
     private final int code;
     private final String message;

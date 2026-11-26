@@ -2,6 +2,7 @@ package com.psyagent.bootstrap.controller;
 
 import com.psyagent.common.api.R;
 import com.psyagent.infra.ai.AiChatFacade;
+import com.psyagent.infra.ai.ProbeResult;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,11 +29,25 @@ public class HealthController {
 
     @GetMapping("/health")
     public R<Map<String, Object>> health() {
+        ProbeResult probe = aiChatFacade.probe();
+
+        Map<String, Object> llm = new LinkedHashMap<>();
+        llm.put("configured", aiChatFacade.available());
+        llm.put("state", probe.state());
+        llm.put("ok", probe.ok());
+        llm.put("costMs", probe.costMs());
+        llm.put("checkedAt", probe.checkedAt().toString());
+        if (probe.detail() != null) {
+            llm.put("detail", probe.detail());
+        }
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("status", "UP");
         body.put("app", "psy-agent");
-        body.put("llmAvailable", aiChatFacade.available());
         body.put("model", aiChatFacade.modelName());
+        // 保留旧字段：配了 Key 但 Key 无效时，它会是 true —— 判断可用性请看 llm.ok
+        body.put("llmAvailable", aiChatFacade.available());
+        body.put("llm", llm);
         body.put("javaVersion", System.getProperty("java.version"));
         body.put("serverTime", OffsetDateTime.now().toString());
         return R.ok(body);

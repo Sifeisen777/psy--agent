@@ -23,4 +23,10 @@ public interface AiChatFacade {
      * @return 模型回复
      */
     String chat(String userId, String message);
+
+    /**
+     * 真实探活：拿当前 Key 实际发一次最小请求，确认模型侧可用。
+     * 实现方必须自带缓存（默认 60 秒），避免每次健康检查都产生费用与延迟。
+     */
+    ProbeResult probe();
 }
