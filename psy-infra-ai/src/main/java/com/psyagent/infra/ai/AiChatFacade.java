@@ -25,6 +25,12 @@ public interface AiChatFacade {
     String chat(String userId, String message);
 
     /**
+     * 流式对话。返回的每个元素是一个增量片段（可能是一个字、一个词或一段），
+     * 由调用方决定如何拼接与推送，门面层不关心传输方式。
+     */
+    reactor.core.publisher.Flux<String> streamChat(String userId, String message);
+
+    /**
      * 真实探活：拿当前 Key 实际发一次最小请求，确认模型侧可用。
      * 实现方必须自带缓存（默认 60 秒），避免每次健康检查都产生费用与延迟。
      */

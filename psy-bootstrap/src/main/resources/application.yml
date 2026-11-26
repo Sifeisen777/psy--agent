@@ -10,6 +10,11 @@ spring:
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
+  # SSE 异步请求：容器层超时，需 ≥ SseEmitter 自身设置的 120s，否则会被 Tomcat 先掐断
+  mvc:
+    async:
+      request-timeout: 130000
+
   # 数据库版本化迁移：启动时自动执行 classpath:db/migration 下未应用的脚本
   # baseline-on-migrate：允许对已有数据的库首次接入 Flyway
   flyway:

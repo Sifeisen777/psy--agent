@@ -29,6 +29,14 @@ public class MockAiChatFacade implements AiChatFacade {
     }
 
     @Override
+    public reactor.core.publisher.Flux<String> streamChat(String userId, String message) {
+        // 逐字吐出，让前端在 Mock 模式下也能验证流式渲染与断线处理
+        String text = chat(userId, message);
+        return reactor.core.publisher.Flux.fromArray(text.split(""))
+                .delayElements(java.time.Duration.ofMillis(8));
+    }
+
+    @Override
     public ProbeResult probe() {
         return ProbeResult.mock();
     }

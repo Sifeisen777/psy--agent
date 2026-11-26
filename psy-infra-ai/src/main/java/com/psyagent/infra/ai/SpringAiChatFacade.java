@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.ChatOptions;
+import reactor.core.publisher.Flux;
 
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -59,6 +60,25 @@ public class SpringAiChatFacade implements AiChatFacade {
             log.warn("ai call failed user={} model={} cost={}ms", userId, properties.model(), cost, e);
             throw e;
         }
+    }
+
+    @Override
+    public Flux<String> streamChat(String userId, String message) {
+        long start = System.currentTimeMillis();
+        return chatClient.prompt()
+                .user(message)
+                .stream()
+                .content()
+                .doOnComplete(() -> log.info("ai stream done user={} cost={}ms", userId,
+                        System.currentTimeMillis() - start))
+                .doOnError(e -> {
+                    // 流式是异步的，无法把异常翻译成 HTTP 状态码，只能记日志 + 让 SSE 发 error 事件
+                    if (isAuthError(e)) {
+                        log.warn("ai stream auth failed user={}", userId);
+                    } else {
+                        log.warn("ai stream failed user={}", userId, e);
+                    }
+                });
     }
 
     @Override
