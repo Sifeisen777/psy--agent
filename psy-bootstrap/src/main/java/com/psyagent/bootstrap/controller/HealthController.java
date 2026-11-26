@@ -47,6 +47,21 @@ public class HealthController {
         return R.ok(body);
     }
 
+    /**
+     * 存活探针：只证明"我是 psy-agent 且我活着"，不做任何 IO。
+     * <p>
+     * 为什么不能拿 {@code /health} 当探针用：它会真实调用一次模型（约 1.5 秒），
+     * 前端/负载均衡如果按几百毫秒超时探测，会把正常服务判成不可用。
+     * 探针要轻，健康检查可以重，两者职责不同。
+     */
+    @GetMapping("/ping")
+    public R<Map<String, Object>> ping() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("app", "psy-agent");
+        body.put("ts", System.currentTimeMillis());
+        return R.ok(body);
+    }
+
     @GetMapping("/health")
     public R<Map<String, Object>> health() {
         ProbeResult probe = aiChatFacade.probe();
