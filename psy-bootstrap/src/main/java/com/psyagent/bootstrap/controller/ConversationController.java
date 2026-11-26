@@ -1,5 +1,6 @@
 package com.psyagent.bootstrap.controller;
 
+import com.psyagent.bootstrap.service.AuthService;
 import com.psyagent.bootstrap.service.ConversationService;
 import com.psyagent.common.api.R;
 import com.psyagent.store.entity.Conversation;
@@ -23,13 +24,22 @@ import java.util.List;
 public class ConversationController {
 
     private final ConversationService conversationService;
+    private final AuthService authService;
 
-    public ConversationController(ConversationService conversationService) {
+    public ConversationController(ConversationService conversationService, AuthService authService) {
         this.conversationService = conversationService;
+        this.authService = authService;
     }
 
+    /**
+     * 会话列表。
+     * <p>
+     * 先校验用户存在：用户表里没有这个 id 时直接 40400，
+     * 前端在"进入"那一刻就能发现 userId 填错，而不是发完第一条消息才报错。
+     */
     @GetMapping("/list")
     public R<List<Conversation>> list(@RequestParam Long userId) {
+        authService.getById(userId);
         return R.ok(conversationService.listByUser(userId));
     }
 
