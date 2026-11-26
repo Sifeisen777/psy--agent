@@ -70,7 +70,7 @@ public class ChatController {
         checkRate(request.userId());
         authService.getById(request.userId());
 
-        long start = System.currentTimeMillis();
+        long startedAt = System.currentTimeMillis();
         String reply;
         try {
             reply = aiChatFacade.chat(String.valueOf(request.userId()), request.message());
@@ -80,7 +80,7 @@ public class ChatController {
             log.error("chat failed userId={}", request.userId(), e);
             throw BizException.of(ResultCode.AI_UNAVAILABLE);
         }
-        long cost = System.currentTimeMillis() - start;
+        int cost = (int) (System.currentTimeMillis() - startedAt);
         return R.ok(new ChatReply(reply, aiChatFacade.modelName(), !aiChatFacade.available(), cost));
     }
 
@@ -178,7 +178,7 @@ public class ChatController {
                             if (!clientGone.get()) {
                                 try {
                                     Map<String, Object> done = new LinkedHashMap<>();
-                                    done.put("costMs", System.currentTimeMillis() - start);
+                                    done.put("costMs", (int) (System.currentTimeMillis() - start));
                                     done.put("length", buffer.length());
                                     emitter.send(SseEmitter.event().name("done").data(done));
                                 } catch (IOException ignored) {
@@ -233,6 +233,6 @@ public class ChatController {
     ) {
     }
 
-    public record ChatReply(String reply, String model, boolean mock, long costMs) {
+    public record ChatReply(String reply, String model, boolean mock, int costMs) {
     }
 }

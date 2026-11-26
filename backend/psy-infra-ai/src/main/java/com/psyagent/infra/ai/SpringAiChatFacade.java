@@ -96,9 +96,9 @@ public class SpringAiChatFacade implements AiChatFacade {
                     .options(ChatOptions.builder().maxTokens(1).build())
                     .call()
                     .content();
-            result = ProbeResult.ok(System.currentTimeMillis() - start);
+            result = ProbeResult.ok((int) (System.currentTimeMillis() - start));
         } catch (RuntimeException e) {
-            long cost = System.currentTimeMillis() - start;
+            int cost = (int) (System.currentTimeMillis() - start);
             result = isAuthError(e)
                     ? ProbeResult.authFailed(cost)
                     : ProbeResult.error(truncate(rootMessage(e)), cost);

@@ -42,8 +42,8 @@ public class HealthController {
     @GetMapping("/db-check")
     public R<Map<String, Object>> dbCheck() {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("userCount", userMapper.selectCount(null));
-        body.put("conversationCount", conversationMapper.selectCount(null));
+        body.put("userCount", userMapper.selectCount(null).intValue());
+        body.put("conversationCount", conversationMapper.selectCount(null).intValue());
         return R.ok(body);
     }
 
