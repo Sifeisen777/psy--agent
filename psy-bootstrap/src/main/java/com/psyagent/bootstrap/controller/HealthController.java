@@ -3,6 +3,8 @@ package com.psyagent.bootstrap.controller;
 import com.psyagent.common.api.R;
 import com.psyagent.infra.ai.AiChatFacade;
 import com.psyagent.infra.ai.ProbeResult;
+import com.psyagent.store.mapper.ConversationMapper;
+import com.psyagent.store.mapper.UserMapper;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,9 +24,27 @@ import java.util.Map;
 public class HealthController {
 
     private final AiChatFacade aiChatFacade;
+    private final UserMapper userMapper;
+    private final ConversationMapper conversationMapper;
 
-    public HealthController(AiChatFacade aiChatFacade) {
+    public HealthController(AiChatFacade aiChatFacade,
+                            UserMapper userMapper,
+                            ConversationMapper conversationMapper) {
         this.aiChatFacade = aiChatFacade;
+        this.userMapper = userMapper;
+        this.conversationMapper = conversationMapper;
+    }
+
+    /**
+     * 存储连通性自检：真的执行一次 count，而不是只 ping 连接池。
+     * Flyway 建表成功与否，打这个接口就知道。
+     */
+    @GetMapping("/db-check")
+    public R<Map<String, Object>> dbCheck() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("userCount", userMapper.selectCount(null));
+        body.put("conversationCount", conversationMapper.selectCount(null));
+        return R.ok(body);
     }
 
     @GetMapping("/health")

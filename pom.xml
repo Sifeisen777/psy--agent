@@ -21,6 +21,7 @@
     <modules>
         <module>psy-common</module>
         <module>psy-infra-ai</module>
+        <module>psy-infra-store</module>
         <module>psy-bootstrap</module>
     </modules>
 
@@ -28,7 +29,8 @@
         <java.version>17</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-ai.version>1.1.8</spring-ai.version>
-        <!-- 阶段 2 启用：Spring AI Alibaba Agent Framework -->
+        <mybatis-plus.version>3.5.18</mybatis-plus.version>
+        <!-- 阶段 6 启用：Spring AI Alibaba Agent Framework -->
         <spring-ai-alibaba.version>1.1.2.3</spring-ai-alibaba.version>
     </properties>
 
@@ -51,6 +53,17 @@
                 <groupId>com.psyagent</groupId>
                 <artifactId>psy-infra-ai</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.psyagent</groupId>
+                <artifactId>psy-infra-store</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+                <version>${mybatis-plus.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

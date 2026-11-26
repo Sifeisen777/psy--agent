@@ -4,11 +4,13 @@ import com.psyagent.common.api.R;
 import com.psyagent.common.api.ResultCode;
 import com.psyagent.common.exception.BizException;
 import com.psyagent.infra.ai.AiChatFacade;
+import com.psyagent.store.ratelimit.RedisRateLimiter;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,13 +29,25 @@ public class ChatController {
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
 
     private final AiChatFacade aiChatFacade;
+    private final RedisRateLimiter rateLimiter;
+    private final int chatLimit;
 
-    public ChatController(AiChatFacade aiChatFacade) {
+    public ChatController(AiChatFacade aiChatFacade,
+                          RedisRateLimiter rateLimiter,
+                          @Value("${psy.rate-limit.chat-per-minute:10}") int chatLimit) {
         this.aiChatFacade = aiChatFacade;
+        this.rateLimiter = rateLimiter;
+        this.chatLimit = chatLimit;
     }
 
     @PostMapping
     public R<ChatReply> chat(@RequestBody @Valid ChatRequest request) {
+        // 限流放在最前面：挡住的是"最贵"的那一步，而不是等模型调用完再拒绝
+        if (!rateLimiter.tryAcquire("rl:chat:" + request.userId(), chatLimit, 60)) {
+            log.warn("rate limited userId={} limit={}/min", request.userId(), chatLimit);
+            throw BizException.of(ResultCode.RATE_LIMITED);
+        }
+
         long start = System.currentTimeMillis();
         String reply;
         try {
