@@ -34,6 +34,6 @@ frontend/.vite/
 # ---- 个人学习笔记：只在本地保留，不进版本库 ----
 # 约定：复盘/作业/阶段笔记统一放仓库外的 notes/ 目录；
 # 仓库里的 docs/ 只放面向使用者的项目文档（架构、接口、部署）。
-docs/stage-*.md
-docs/*-review.md
+**/docs/stage-*.md
+**/docs/*-review.md
 

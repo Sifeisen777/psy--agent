@@ -19,23 +19,35 @@
 
 ```
 psy-agent/
-├── pom.xml                 父 POM：版本仲裁、模块聚合
-├── psy-common/             通用契约：R 统一响应、ResultCode、BizException
-├── psy-infra-ai/           模型接入：AiChatFacade 门面、ChatClient 装配、Mock 降级
-└── psy-bootstrap/          主服务：启动类、Controller、全局异常、配置
+├── backend/                    后端（Maven 多模块）
+│   ├── pom.xml                 父 POM：版本仲裁、模块聚合
+│   ├── psy-common/             通用契约：R 统一响应、ResultCode、BizException
+│   ├── psy-infra-ai/           模型接入：AiChatFacade 门面、ChatClient 装配、Mock 降级、探活
+│   ├── psy-infra-store/        存储：实体、Mapper、Flyway 迁移、Redis 限流
+│   ├── psy-bootstrap/          主服务：启动类、Controller、Service、全局异常、配置
+│   ├── docs/                   项目文档（接口、协作规范）
+│   └── scripts/                后端启动脚本
+└── frontend/                   前端（Vue3 + Vite）
+    ├── src/                    源码
+    ├── 启动前端.cmd             双击启动（自动装依赖 + 探测后端端口 + 开浏览器）
+    └── 关闭前端.cmd             双击关闭（释放 5173 端口）
 ```
 
-**为什么先拆这三块**：编译期强制隔离。`psy-common` 不允许依赖 Spring Web，
-`psy-infra-ai` 不允许依赖 Controller——一旦有人反向依赖，编译就红。
+**为什么拆模块**：编译期强制隔离。`psy-common` 不允许依赖 Spring Web，
+`psy-infra-ai` 不允许依赖 Controller——一旦反向依赖，编译就红。
 后面 `mcp-server`（独立进程）也能直接复用 `psy-common`，不用拷代码。
 
 ## 快速启动
 
+### 后端
+
 ```bash
+cd backend
+
 # 1. 配置（可选，不配也能起来，走 Mock）
 cd psy-bootstrap/src/main/resources
 copy application-local.yml.example application-local.yml
-# 编辑 application-local.yml，填入 DEEPSEEK_API_KEY
+# 编辑 application-local.yml，填入 DEEPSEEK_API_KEY 与数据库密码
 
 # 2. 构建（Windows 下确保用 JDK 17）
 mvn -DskipTests package
@@ -44,8 +56,18 @@ mvn -DskipTests package
 java -jar psy-bootstrap/target/psy-bootstrap-1.0.0-SNAPSHOT.jar
 
 # 端口被占用时
-java -jar psy-bootstrap/target/psy-bootstrap-1.0.0-SNAPSHOT.jar --server.port=18080
+java -jar psy-bootstrap/target/psy-bootstrap-1.0.0-SNAPSHOT.jar --server.port=18087
 ```
+
+也可以用 IDEA 直接运行 `PsyAgentApplication`（Project SDK 选 17）。
+
+### 前端
+
+双击 `frontend/启动前端.cmd`，会依次完成：安装依赖（国内镜像）→ 启动 Vite → 打开浏览器。
+脚本会自动探测后端端口（8080 / 18080 / 18087…），并校验响应确实是 psy-agent，
+所以后端换端口不用改配置；确实需要指定时设 `VITE_API_TARGET` 即可。
+
+停止：双击 `frontend/关闭前端.cmd`，或直接关掉那个命令行窗口。
 
 ## 接口
 
