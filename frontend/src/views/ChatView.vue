@@ -69,7 +69,9 @@ async function send() {
 
   try {
     await streamChat({
-      userId: Number(props.userId),
+      // userId 必须保持字符串：雪花 ID 有 19 位，Number() 会丢精度（末位被四舍五入），
+      // 后端就会报「用户不存在」——这是"能进去但发消息失败"的经典原因
+      userId: props.userId,
       conversationId: currentId.value,
       message: text,
       signal: abort.signal,
