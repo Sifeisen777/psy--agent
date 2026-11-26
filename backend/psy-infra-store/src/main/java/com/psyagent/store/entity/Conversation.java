@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
  * <p>
  * {@code messageCount} 与 {@code lastMessageAt} 是**冗余字段**：会话列表页只需要这两个值，
  * 若不冗余，每次翻列表都要对 t_message 做 count/max，几十条会话就是几十次聚合。
- * 冗余的代价是写入时要同步维护——阶段 3 落库消息时会在同一事务里 +1 并更新时间。
+ * 冗余的代价是写入时要同步维护——落库消息时在同一事务内 +1 并更新活跃时间。
  */
 @Data
 @TableName("t_conversation")

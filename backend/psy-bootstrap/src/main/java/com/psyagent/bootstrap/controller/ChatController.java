@@ -96,7 +96,7 @@ public class ChatController {
      * </pre>
      * 为什么用 SseEmitter 而不是直接返回 Flux：当前是 Servlet 栈（Tomcat），
      * 直接返回 Flux 需要引入 WebFlux 走响应式适配；SseEmitter 更贴近"Servlet 异步"的真相，
-     * 也便于精确控制超时与资源释放。阶段 8 若整体迁移 WebFlux 再统一替换。
+     * 也便于精确控制超时与资源释放。若后续迁移至 WebFlux，可统一替换为返回 Flux。
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(@RequestBody @Valid StreamRequest request) {

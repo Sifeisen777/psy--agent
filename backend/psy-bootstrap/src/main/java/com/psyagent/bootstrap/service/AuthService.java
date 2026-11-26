@@ -11,9 +11,8 @@ import org.springframework.stereotype.Service;
 /**
  * 账号服务。
  * <p>
- * 阶段 3 还没有 JWT，接口靠前端传 userId。这是**临时状态**——
- * 阶段 4 接入鉴权后，userId 必须从 token 解析，绝不能继续信任请求体。
- * 这一点在简历项目里必须写清楚，否则面试官会问"你怎么防止越权访问别人的会话"。
+ * 当前版本尚未接入身份认证，接口由调用方传入 userId。
+ * 引入鉴权后，userId 必须从访问令牌解析，避免客户端伪造身份越权访问他人会话。
  */
 @Service
 public class AuthService {

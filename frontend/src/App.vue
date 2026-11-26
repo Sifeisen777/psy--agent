@@ -80,7 +80,7 @@ function logout() {
   <div v-else class="entry">
     <div class="card">
       <h1>psy-agent</h1>
-      <p class="sub">心理支持助手 · 阶段 3</p>
+      <p class="sub">心理支持助手</p>
 
       <label class="field">
         <span>已有 userId？直接进入</span>
@@ -110,7 +110,7 @@ function logout() {
       </button>
 
       <p v-if="error" class="error">{{ error }}</p>
-      <p class="hint">阶段 3 尚未接入登录鉴权，userId 由前端携带；阶段 4 会换成 JWT。</p>
+      <p class="hint">当前版本尚未接入身份验证，userId 由前端携带；后续将改为令牌校验。</p>
     </div>
   </div>
 </template>

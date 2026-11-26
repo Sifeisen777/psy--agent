@@ -30,7 +30,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-ai.version>1.1.8</spring-ai.version>
         <mybatis-plus.version>3.5.18</mybatis-plus.version>
-        <!-- 阶段 6 启用：Spring AI Alibaba Agent Framework -->
+        <!-- Agent 编排框架，按需启用 -->
         <spring-ai-alibaba.version>1.1.2.3</spring-ai-alibaba.version>
     </properties>
 

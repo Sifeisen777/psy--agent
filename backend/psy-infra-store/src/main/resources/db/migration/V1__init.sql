@@ -22,8 +22,8 @@ CREATE TABLE t_user
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT '用户';
 
--- 注意：uk_username 与逻辑删除天然冲突——删除后同名账号无法再注册。
--- 阶段 3 做注册功能时用「删除时把 username 改写为 username#<id>」解决，先记录在此。
+-- 注意：uk_username 与逻辑删除存在冲突——删除后同名账号无法再注册。
+-- 处理方式：注销时将 username 改写为 username#<id>，既保留审计痕迹又释放用户名。
 
 CREATE TABLE t_conversation
 (
@@ -52,7 +52,7 @@ CREATE TABLE t_message
     tokens_in       INT                  DEFAULT NULL,
     tokens_out      INT                  DEFAULT NULL,
     cost_ms         INT                  DEFAULT NULL COMMENT '本次模型调用耗时',
-    risk_level      VARCHAR(16)          DEFAULT NULL COMMENT 'NONE / LOW / MEDIUM / HIGH，阶段 6 由情绪评估 Agent 写入',
+    risk_level      VARCHAR(16)          DEFAULT NULL COMMENT 'NONE / LOW / MEDIUM / HIGH，由情绪评估流程写入',
     created_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_conv_id (conversation_id, id)

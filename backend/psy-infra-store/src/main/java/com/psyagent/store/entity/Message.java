@@ -13,8 +13,8 @@ import java.time.LocalDateTime;
  * 与另外两张表不同：**不做逻辑删除**。消息是审计与回溯的依据，
  * 一旦允许删除，"为什么这个用户被判为高风险"就查不清了。需要清理走归档，不走 delete。
  * <p>
- * {@code riskLevel} 现在恒为 null，阶段 6 由情绪评估 Agent 写入，
- * 阶段 6 的危机干预会直接按 `risk_level in ('MEDIUM','HIGH')` 做后台检索。
+ * {@code riskLevel} 当前恒为 null，由情绪评估流程写入；
+ * 危机干预可按 `risk_level in ('MEDIUM','HIGH')` 做后台检索。
  */
 @Data
 @TableName("t_message")

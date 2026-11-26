@@ -44,8 +44,8 @@ public class ConversationService {
     }
 
     /**
-     * 新建会话。标题先用首条消息截断，阶段 4 换成模型摘要生成。
-     * 用规则而非模型生成的理由：标题生成是首轮对话的阻塞路径，多一次模型调用就多 1–2 秒等待。
+     * 新建会话。标题取首条消息截断，后续可改为模型摘要生成。
+     * 选择规则而非模型生成的原因：标题生成处于首轮对话的阻塞路径，多一次模型调用即多 1–2 秒等待。
      */
     public Conversation create(Long userId, String firstMessage) {
         Conversation conversation = new Conversation();

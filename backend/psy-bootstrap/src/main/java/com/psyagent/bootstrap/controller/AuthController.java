@@ -15,11 +15,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 账号接口（阶段 3 临时版）。
+ * 账号接口。
  * <p>
- * 目前没有登录态：注册返回 userId 后由前端自行携带。
- * 阶段 4 接入 JWT 后，userId 必须从 token 取，这两个接口的契约会变——
- * 届时用 `/api/auth/login` 换 token，`unregister` 从 token 里读用户，不再收参数。
+ * 当前版本尚未接入身份认证，注册后返回 userId 由调用方持有。
+ * 接入令牌校验后，用户身份应从中解析，这两个接口的契约将随之调整。
  */
 @RestController
 @RequestMapping("/api/auth")

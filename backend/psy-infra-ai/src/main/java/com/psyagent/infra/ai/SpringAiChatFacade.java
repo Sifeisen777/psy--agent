@@ -111,7 +111,7 @@ public class SpringAiChatFacade implements AiChatFacade {
     /**
      * 401 会被 Spring AI 包成 NonTransientAiException，异常链里没有专门类型，
      * 只能靠状态码与报文判定。这是兜底识别，不是最优解——
-     * 阶段 8 换成自定义 ResponseErrorHandler 后可拿到结构化错误。
+     * 可通过自定义 ResponseErrorHandler 获取结构化错误。
      */
     private static boolean isAuthError(Throwable e) {
         for (Throwable t = e; t != null && t.getCause() != t; t = t.getCause()) {

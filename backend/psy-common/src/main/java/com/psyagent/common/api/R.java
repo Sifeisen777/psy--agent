@@ -8,7 +8,7 @@ import java.time.Instant;
  * 统一响应体。
  * <p>
  * 为什么不用裸 DTO：前端拦截器需要一个稳定的外层结构来判断成功/失败、弹提示、做埋点。
- * {@code traceId} 现在先占位，阶段 6 接 OpenTelemetry 后由 MDC 注入，前端报错截图能直接定位链路。
+ * {@code traceId} 为链路追踪预留，接入后由 MDC 注入，可据此定位单次请求的完整调用链。
  *
  * @param code    0 表示成功
  * @param message 给人看的提示，不要在前端做逻辑判断
