@@ -5,6 +5,7 @@ import com.psyagent.bootstrap.service.ConversationService;
 import com.psyagent.common.api.R;
 import com.psyagent.store.entity.Conversation;
 import com.psyagent.store.entity.Message;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -36,5 +37,12 @@ public class ConversationController {
     @GetMapping("/{id}/messages")
     public R<List<Message>> messages(@PathVariable Long id) {
         return R.ok(conversationService.listMessages(id, CurrentUser.id()));
+    }
+
+    /** 删除会话。仅移出列表，消息记录保留。 */
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        conversationService.delete(id, CurrentUser.id());
+        return R.ok(null);
     }
 }

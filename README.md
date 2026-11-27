@@ -147,6 +147,7 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 |---|---|---|
 | GET | `/api/conversation/list` | 当前用户的会话列表 |
 | GET | `/api/conversation/{id}/messages` | 指定会话的消息记录 |
+| DELETE | `/api/conversation/{id}` | 删除会话（逻辑删除，消息记录保留） |
 
 ### 账号
 

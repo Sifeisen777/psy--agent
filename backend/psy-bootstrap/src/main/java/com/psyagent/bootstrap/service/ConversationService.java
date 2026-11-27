@@ -94,6 +94,17 @@ public class ConversationService {
                 .orderByAsc(Message::getId));
     }
 
+    /**
+     * 删除会话：仅对会话本身做逻辑删除，消息记录保留。
+     * <p>
+     * 消息不随之删除的原因：心理支持场景下"用户说过什么"属于审计数据，
+     * 一旦允许级联清除，风险判定与问题追溯都会失去依据。会话从列表中消失即可满足用户诉求。
+     */
+    public void delete(Long conversationId, Long userId) {
+        getOwned(conversationId, userId);
+        conversationMapper.deleteById(conversationId);
+    }
+
     private String buildTitle(String firstMessage) {
         String text = firstMessage == null ? "" : firstMessage.strip();
         if (text.isEmpty()) {
