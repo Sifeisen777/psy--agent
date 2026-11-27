@@ -2,6 +2,7 @@ package com.psyagent.bootstrap.controller;
 
 import com.psyagent.bootstrap.security.CurrentUser;
 import com.psyagent.bootstrap.service.AuthService;
+import com.psyagent.bootstrap.service.ConversationMemoryService;
 import com.psyagent.bootstrap.service.ConversationService;
 import com.psyagent.common.api.R;
 import com.psyagent.common.api.ResultCode;
@@ -25,6 +26,7 @@ import reactor.core.Disposable;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -49,17 +51,20 @@ public class ChatController {
     private final AiChatFacade aiChatFacade;
     private final RedisRateLimiter rateLimiter;
     private final ConversationService conversationService;
+    private final ConversationMemoryService memoryService;
     private final AuthService authService;
     private final int chatLimit;
 
     public ChatController(AiChatFacade aiChatFacade,
                           RedisRateLimiter rateLimiter,
                           ConversationService conversationService,
+                          ConversationMemoryService memoryService,
                           AuthService authService,
                           @Value("${psy.rate-limit.chat-per-minute:10}") int chatLimit) {
         this.aiChatFacade = aiChatFacade;
         this.rateLimiter = rateLimiter;
         this.conversationService = conversationService;
+        this.memoryService = memoryService;
         this.authService = authService;
         this.chatLimit = chatLimit;
     }
@@ -74,7 +79,7 @@ public class ChatController {
         long startedAt = System.currentTimeMillis();
         String reply;
         try {
-            reply = aiChatFacade.chat(String.valueOf(userId), request.message());
+            reply = aiChatFacade.chat(String.valueOf(userId), request.message(), List.of());
         } catch (BizException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -109,6 +114,10 @@ public class ChatController {
         Conversation conversation = request.conversationId() == null
                 ? conversationService.create(userId, request.message())
                 : conversationService.getOwned(request.conversationId(), userId);
+
+        // 历史必须在写入本轮消息之前加载，否则当前输入会重复出现在上下文中
+        List<org.springframework.ai.chat.messages.Message> history =
+                memoryService.loadHistory(conversation.getId());
 
         // 用户消息在调用模型前落库，确保模型异常时仍保留用户输入记录
         conversationService.appendMessage(conversation.getId(), userId,
@@ -147,7 +156,7 @@ public class ChatController {
         }
 
         Disposable subscription = aiChatFacade
-                .streamChat(String.valueOf(userId), request.message())
+                .streamChat(String.valueOf(userId), request.message(), history)
                 .subscribe(
                         chunk -> {
                             buffer.append(chunk);

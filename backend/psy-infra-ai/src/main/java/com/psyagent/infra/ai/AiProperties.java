@@ -5,13 +5,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * AI 接入配置。
  * <p>
- * 全部走环境变量注入，配置文件里不出现明文 Key（这是要提交到 Git 的仓库，密钥泄露一次就废）。
+ * 密钥统一由环境变量注入，配置文件中不保留明文。
  *
  * @param apiKey      模型 Key，为空则启用 Mock 模式
  * @param baseUrl     OpenAI 兼容端点，DeepSeek 为 https://api.deepseek.com
  * @param model       模型名
  * @param systemPrompt 全局人设
  * @param timeoutSeconds 单次调用超时（秒）
+ * @param memoryMaxMessages 注入上下文的历史消息上限
  */
 @ConfigurationProperties(prefix = "psy.ai")
 public record AiProperties(
@@ -19,7 +20,8 @@ public record AiProperties(
         String baseUrl,
         String model,
         String systemPrompt,
-        Integer timeoutSeconds
+        Integer timeoutSeconds,
+        Integer memoryMaxMessages
 ) {
 
     public AiProperties {
@@ -41,6 +43,9 @@ public record AiProperties(
         }
         if (timeoutSeconds == null || timeoutSeconds <= 0) {
             timeoutSeconds = 30;
+        }
+        if (memoryMaxMessages == null || memoryMaxMessages <= 0) {
+            memoryMaxMessages = 20;
         }
     }
 

@@ -5,9 +5,13 @@ import com.psyagent.common.exception.BizException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -40,11 +44,11 @@ public class SpringAiChatFacade implements AiChatFacade {
     }
 
     @Override
-    public String chat(String userId, String message) {
+    public String chat(String userId, String message, List<Message> history) {
         long start = System.currentTimeMillis();
         try {
             String content = chatClient.prompt()
-                    .user(message)
+                    .messages(withCurrentMessage(history, message))
                     .call()
                     .content();
             log.info("ai call ok user={} model={} cost={}ms", userId, properties.model(),
@@ -63,10 +67,10 @@ public class SpringAiChatFacade implements AiChatFacade {
     }
 
     @Override
-    public Flux<String> streamChat(String userId, String message) {
+    public Flux<String> streamChat(String userId, String message, List<Message> history) {
         long start = System.currentTimeMillis();
         return chatClient.prompt()
-                .user(message)
+                .messages(withCurrentMessage(history, message))
                 .stream()
                 .content()
                 .doOnComplete(() -> log.info("ai stream done user={} cost={}ms", userId,
@@ -140,5 +144,12 @@ public class SpringAiChatFacade implements AiChatFacade {
             return null;
         }
         return s.length() <= 200 ? s : s.substring(0, 200) + "...";
+    }
+
+    /** 历史消息在前，本轮输入在最后，顺序即模型看到的对话顺序。 */
+    private static List<Message> withCurrentMessage(List<Message> history, String message) {
+        List<Message> messages = new ArrayList<>(history == null ? List.of() : history);
+        messages.add(new UserMessage(message));
+        return messages;
     }
 }

@@ -61,6 +61,8 @@ psy:
     base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
     model: ${DEEPSEEK_MODEL:deepseek-chat}
     timeout-seconds: 30
+    # 注入上下文的历史消息条数上限，超出后仅保留最近部分
+    memory-max-messages: ${AI_MEMORY_MAX_MESSAGES:20}
   # 对话接口限流：单人每分钟最多 10 次，防刷、防误触、也防模型账单失控
   rate-limit:
     chat-per-minute: ${CHAT_RATE_LIMIT:10}
