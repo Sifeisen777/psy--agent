@@ -15,6 +15,7 @@
 | 模型接入 | OpenAI 兼容协议，可对接 DeepSeek、通义、智谱或本地 vLLM |
 | 无密钥降级 | 未配置模型密钥时以 Mock 模式运行，便于本地开发与 CI |
 | 限流 | 基于 Redis 的会话级限流，拒绝请求不消耗模型调用 |
+| 身份认证 | JWT 无状态鉴权，接口身份取自令牌而非请求参数 |
 | 健康检查 | 存活探针、模型可用性探测（含缓存）、存储自检 |
 
 ## 技术栈
@@ -141,15 +142,16 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/conversation/list?userId=` | 会话列表 |
-| GET | `/api/conversation/{id}/messages?userId=` | 会话消息记录 |
+| GET | `/api/conversation/list` | 当前用户的会话列表 |
+| GET | `/api/conversation/{id}/messages` | 指定会话的消息记录 |
 
 ### 账号
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/auth/register` | 注册 |
-| POST | `/api/auth/unregister?userId=` | 注销（逻辑删除并释放用户名） |
+| POST | `/api/auth/register` | 注册并返回令牌 |
+| POST | `/api/auth/login` | 登录并返回令牌 |
+| POST | `/api/auth/unregister` | 注销当前账号（逻辑删除并释放用户名） |
 
 ### 系统
 
@@ -161,6 +163,28 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 | GET | `/actuator/health` | Spring Boot 原生端点 |
 
 响应统一为 `{ code, message, data, ts }`，`code = 0` 表示成功。
+
+### 认证
+
+除探活、系统自检与登录注册接口外，其余接口需携带：
+
+```
+Authorization: Bearer <token>
+```
+
+令牌由 `/api/auth/login` 或 `/api/auth/register` 签发，默认有效期 2 小时，载荷包含用户标识与用户名。
+未携带或令牌失效返回 HTTP 401（`code = 40100`），权限不足返回 HTTP 403（`code = 40300`）。
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"demo","password":"123456"}' | jq -r .data.token)
+
+curl -N -X POST http://localhost:8080/api/chat/stream \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"最近压力比较大"}'
+```
 
 ## 数据模型
 
@@ -179,6 +203,8 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 | `psy.ai.base-url` | OpenAI 兼容端点 | `https://api.deepseek.com` |
 | `psy.ai.model` | 模型名称 | `deepseek-chat` |
 | `psy.rate-limit.chat-per-minute` | 单用户每分钟对话次数上限 | `10` |
+| `psy.jwt.secret` | 令牌签名密钥（HS256，至少 32 字节），生产环境通过 `PSY_JWT_SECRET` 注入 | 开发默认值 |
+| `psy.jwt.expiration` | 令牌有效期 | `2h` |
 | `spring.datasource.*` | 数据库连接 | — |
 | `spring.data.redis.*` | Redis 连接 | — |
 
@@ -196,7 +222,7 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 - [x] 模型接入层、无密钥降级、可用性探测
 - [x] 数据持久化、版本化迁移、会话级限流
 - [x] 流式对话、会话管理、Web 客户端
-- [ ] 身份认证与访问控制
+- [x] 身份认证与访问控制（JWT）
 - [ ] 对话记忆与结构化情绪评估
 - [ ] 知识库检索与引用溯源
 - [ ] 多智能体编排与工具调用
