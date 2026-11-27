@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import ChatView from './views/ChatView.vue'
+import MetricsView from './views/MetricsView.vue'
 import {
   clearAuth,
   getToken,
@@ -11,6 +12,7 @@ import {
 } from './api/client'
 
 const authed = ref(!!getToken())
+const view = ref('chat')
 const username = ref('')
 const password = ref('')
 const mode = ref('login')
@@ -51,6 +53,7 @@ async function submit() {
 function logout() {
   clearAuth()
   authed.value = false
+  view.value = 'chat'
   username.value = ''
   password.value = ''
   error.value = ''
@@ -58,7 +61,13 @@ function logout() {
 </script>
 
 <template>
-  <ChatView v-if="authed" :username="getUsername()" @logout="logout" />
+  <ChatView
+    v-if="authed && view === 'chat'"
+    :username="getUsername()"
+    @logout="logout"
+    @open-metrics="view = 'metrics'"
+  />
+  <MetricsView v-else-if="authed" @back="view = 'chat'" @logout="logout" />
 
   <div v-else class="entry">
     <div class="card">

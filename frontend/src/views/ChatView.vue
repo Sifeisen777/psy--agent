@@ -7,7 +7,7 @@ import { del, get, streamChat } from '../api/client'
 defineProps({
   username: { type: String, default: '' }
 })
-const emit = defineEmits(['logout'])
+const emit = defineEmits(['logout', 'open-metrics'])
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -148,6 +148,13 @@ async function send() {
           reply.route = info.route
           reply.steps = info.steps || []
         }
+        if (info.tools) {
+          reply.tools = info.tools
+        }
+        if (info.traceId) {
+          reply.traceId = info.traceId
+          reply.ttftMs = info.ttftMs
+        }
         if (info.emotion) {
           // 评估结果描述的是用户此刻的状态，挂到用户这条消息上
           userMsg.emotion = info.emotion
@@ -247,6 +254,7 @@ function routeText(route) {
     <aside class="sidebar">
       <div class="brand">
         <strong>psy-agent</strong>
+        <button class="side-link" @click="emit('open-metrics')">观测看板 →</button>
       </div>
 
       <div class="account">
@@ -339,6 +347,19 @@ function routeText(route) {
                   {{ step.node }}<em v-if="step.detail"> {{ step.detail }}</em>
                 </span>
               </template>
+            </div>
+            <div v-if="msg.tools?.length" class="tool-trace">
+              <span class="trace-label">工具</span>
+              <span
+                v-for="(tool, i) in msg.tools"
+                :key="i"
+                class="tool-chip"
+                :class="{ failed: !tool.success }"
+                :title="tool.summary"
+              >{{ tool.name }} · {{ tool.costMs }}ms</span>
+            </div>
+            <div v-if="msg.traceId" class="trace-id">
+              trace {{ msg.traceId }}<span v-if="msg.ttftMs"> · 首字 {{ msg.ttftMs }}ms</span>
             </div>
             <div
               v-if="msg.emotion || msg.riskLevel"

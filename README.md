@@ -16,10 +16,14 @@
 | 情绪与风险评估 | 模型输出结构化结果（情绪 / 强度 / 风险等级），写入消息记录 |
 | 知识库检索 | 心理科普内容切片入库，回答前检索并在回复中标注引用来源 |
 | 对话编排 | 分诊后按「知识问答 / 情绪支持 / 危机干预 / 简短寒暄」切换策略，危机场景标记人工复核 |
+| 工具服务 | 量表计分、咨询预约、运行统计、危机告警；统一注册表 + 调用审计 |
+| MCP 接入 | Streamable HTTP 端点暴露 `tools/list` / `tools/call`，供外部模型客户端调用同一批工具 |
+| 可观测 | traceId 贯穿日志与 SSE，单轮轨迹落库，看板展示路由分布、延迟分位与趋势 |
+| 评测与压测 | 结构化断言评测集、并发压测脚本与可复现报告 |
 | 模型接入 | OpenAI 兼容协议，可对接 DeepSeek、通义、智谱或本地 vLLM |
 | 无密钥降级 | 未配置模型密钥时以 Mock 模式运行，便于本地开发与 CI |
 | 限流 | 基于 Redis 的会话级限流，拒绝请求不消耗模型调用 |
-| 身份认证 | JWT 无状态鉴权，接口身份取自令牌而非请求参数 |
+| 身份认证 | JWT 无状态鉴权，接口身份取自令牌而非请求参数；MCP 端点使用独立令牌 |
 | 健康检查 | 存活探针、模型可用性探测（含缓存）、存储自检 |
 
 ## 技术栈
@@ -79,11 +83,16 @@ psy-agent/
 │   ├── psy-infra-ai/           模型接入
 │   ├── psy-infra-store/        持久化与缓存
 │   ├── psy-bootstrap/          应用主模块
+│   │   ├── agent/              编排节点与上下文
+│   │   ├── tool/               工具注册表、实现与告警通道
+│   │   ├── observability/      traceId 过滤器与轨迹落库
+│   │   └── controller/         HTTP 与 SSE 入口
 │   └── scripts/                启动脚本
-└── frontend/
-    ├── src/                    源码
-    ├── 启动前端.cmd             Windows 启动脚本
-    └── 关闭前端.cmd             Windows 停止脚本
+├── frontend/
+│   ├── src/                    源码（对话视图 + 观测看板）
+│   ├── 启动前端.cmd             Windows 启动脚本
+│   └── 关闭前端.cmd             Windows 停止脚本
+└── eval/                       评测集、评测 / 压测脚本与报告
 ```
 
 ## 快速开始
@@ -142,12 +151,13 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 
 | 事件 | 载荷 | 说明 |
 |---|---|---|
-| `meta` | `{conversationId, title}` | 首帧，返回会话标识 |
+| `meta` | `{conversationId, title, traceId}` | 首帧，返回会话标识与链路 ID |
 | `delta` | 文本片段 | 增量内容，可多次 |
-| `done` | `{costMs, length, emotion, citations, route, steps, hitl}` | 生成结束，附带编排轨迹 |
+| `done` | `{costMs, length, emotion, citations, route, steps, hitl, traceId, tools, ttftMs}` | 生成结束，附带编排轨迹与观测指标 |
 | `error` | 错误提示 | 生成失败 |
 
-`emotion` / `citations` / `route` / `steps` 的含义见下文「对话编排」与「知识库与检索」。
+`emotion` / `citations` / `route` / `steps` 的含义见下文「对话编排」与「知识库与检索」；
+`tools` 为本轮工具调用摘要，`ttftMs` 为首字延迟，`traceId` 同时出现在响应头 `X-Trace-Id`。
 
 ### 会话
 
@@ -174,7 +184,27 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 | GET | `/api/system/db-check` | 存储连通性自检 |
 | GET | `/actuator/health` | Spring Boot 原生端点 |
 
-响应统一为 `{ code, message, data, ts }`，`code = 0` 表示成功。
+### 工具
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/tools` | 可用工具清单，含名称、描述与 JSON Schema |
+| POST | `/api/tools/{name}` | 直调工具，请求体为参数对象，返回 `{success, summary, data, error}` |
+
+### MCP
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/mcp` | JSON-RPC 2.0，支持 `initialize` / `tools/list` / `tools/call` / `ping` |
+
+### 观测
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/metrics/overview?hours=24` | 路由分布、首字延迟分位、工具调用统计与逐小时趋势 |
+| GET | `/api/metrics/traces?limit=20` | 最近若干轮轨迹明细（不含对话正文） |
+
+除 `/mcp` 与下方白名单外，响应统一为 `{ code, message, data, ts }`，`code = 0` 表示成功。
 
 ### 认证
 
@@ -186,6 +216,10 @@ Authorization: Bearer <token>
 
 令牌由 `/api/auth/login` 或 `/api/auth/register` 签发，默认有效期 2 小时，载荷包含用户标识与用户名。
 未携带或令牌失效返回 HTTP 401（`code = 40100`），权限不足返回 HTTP 403（`code = 40300`）。
+
+`/mcp` 面向外部模型客户端，不携带本系统 JWT，改用 `X-MCP-Token`（或 `Authorization: Bearer`）
+与 `psy.mcp.access-token` 比对；令牌错误返回 HTTP 401 的 JSON-RPC 错误响应。
+生产环境必须通过 `PSY_MCP_TOKEN` 覆盖默认开发令牌。
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
@@ -207,6 +241,10 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 | `t_message` | 消息，只追加；`risk_level` 记录该条用户消息的风险等级 |
 | `t_knowledge_doc` | 知识库文档，保留原文用于溯源 |
 | `t_knowledge_chunk` | 知识切片，`content` 建有 ngram 全文索引用于检索 |
+| `t_scale_record` | 量表计分记录，只存分值序列与分级 |
+| `t_appointment` | 咨询预约，唯一幂等键避免重复提交 |
+| `t_tool_call` | 工具调用审计，编排 / MCP / REST 三个入口统一落库，参数脱敏 |
+| `t_chat_trace` | 单轮对话轨迹，看板数据源，`trace_id` 唯一；不存对话正文 |
 | `flyway_schema_history` | 迁移记录，由 Flyway 维护 |
 
 ## 对话编排
@@ -214,8 +252,9 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 每轮对话先分诊，再按路由执行不同节点，最后把各节点产出汇总成系统提示交给模型。
 
 ```
-分诊 ──┬─→ 知识检索 ──→ 生成
-       └─→ 危机干预 ──→ 生成
+请求 → 分诊 ─┬─→ 知识检索 ─┐
+             ├─→ 危机干预 ─┼─→ 工具编排 ─→ 拼装系统提示 ─→ 模型生成
+             └─（寒暄跳过）┘
 ```
 
 ### 路由与策略
@@ -228,7 +267,7 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 | `SMALLTALK` | 短句且无领域词 | 一两句回应，自然引导，跳过检索 |
 
 模型是同一个，差异全部体现在提示词约束上。分诊用规则而非模型分类，原因有三：
-分类若走模型要再加 300ms 且直接叠在首字延迟上；规则命中哪条可复盘；
+分类若走模型要再加 300ms 且直接叠在首字延迟上；规则命中哪条可追溯；
 风险判定不能依赖概率——规则命中即拦截，比模型"综合判断"更可靠。
 
 ### 节点与执行轨迹
@@ -244,6 +283,28 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 ```
 
 `hitl = true` 表示已标记人工复核，前端会同时展示危机干预提示。
+
+### 工具编排
+
+`ToolNode` 在分诊之后执行，按输入意图调用工具，并把**真实执行结果**注入系统提示末尾。
+工具结果不检索、不猜测：模型被明确要求"不要编造工具没有返回的数字、编号或结论"。
+
+| 输入意图 | 调用 | 说明 |
+|---|---|---|
+| CRISIS（自动） | `crisis_alert` | 不依赖模型想起来发告警；结果不注入提示词，避免解释后台流程 |
+| 量表、问卷、PHQ/GAD | `scale_questions` / `scale_score` | 有 7 或 9 个 0–3 作答时直接计分，否则返回题目并引导作答 |
+| 运行状况、多少轮、p95 | `chat_stats` | 聚合查询结果进入回答，数字与看板同源 |
+| 预约且含联系方式 | `create_appointment` | 缺失联系方式时只注入引导语，不产生半成品记录 |
+| 寒暄 / 其余 | 不执行 | 轨迹里不留下空节点 |
+
+工具意图**不改变路由**：路由描述用户此刻的状态，工具是附加能力，单独记在 `tools` 与执行轨迹里。
+
+`done` 帧的 `tools` 示例：
+
+```json
+[{"name":"chat_stats","summary":"最近 24 小时共 81 轮对话，危机 3 轮；首字延迟 p50=465ms",
+  "success":true,"costMs":6}]
+```
 
 ## 知识库与检索
 
@@ -311,6 +372,81 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 - **提示词与对话人设隔离**：评估要求零温度、限定输出长度，不复用聊天提示词，避免影响回复语气。
 - **跳过评估**：`psy.ai.emotion-enabled=false` 时不产生额外调用，`done` 帧不含 `emotion`。
 
+## 工具服务
+
+工具实现 `AgentTool` 接口，由 `ToolRegistry` 统一注册。描述与 JSON Schema 同时用于内部提示词和 MCP 的
+`tools/list`，**工具清单只有一份定义**，不会出现"MCP 能调、对话里没有"的漂移。
+
+| 工具 | 作用 | 副作用 |
+|---|---|---|
+| `scale_questions` | 返回 PHQ-9 / GAD-7 题干与 0–3 选项 | 无（只读） |
+| `scale_score` | 计算总分、分级与建议 | 写 `t_scale_record` |
+| `create_appointment` | 登记咨询预约 | 写 `t_appointment` |
+| `chat_stats` | 聚合路由分布、首字延迟分位、工具调用统计 | 无（只读） |
+| `crisis_alert` | 向已装配通道广播危机告警 | 写 `t_tool_call` + 告警日志 |
+
+约定与边界：
+
+- **工具不抛异常**：参数不合法、存储不可用都返回 `success=false`，对话必须继续。
+- **统一审计**：三个入口（编排节点 / MCP / REST）的每次调用都写 `t_tool_call`，含耗时、成败与来源；
+  参数中的联系方式等字段写入前脱敏，失败调用同样留痕。
+- **幂等**：预约用 `idempotencyKey` + 唯一索引防重复提交；并发撞唯一键时返回既有记录而非报错。
+- **量表安全约束**：PHQ-9 第 9 题（自伤意念）只要 > 0，强制打风险标记并附 12356 热线，
+  不因总分低而被平均分掉；结果一律声明"筛查不等于诊断"。
+- **告警最小必要**：告警内容只有等级、原因摘要与 ID，不含对话原文；通道可并存，
+  单通道失败不影响其余。默认写结构化 WARN 日志，配置 SMTP 后可启用邮件通道。
+
+## MCP 接入
+
+`/mcp` 实现 Streamable HTTP 上的 JSON-RPC 2.0（`2025-06-18`），支持 `initialize`、`tools/list`、
+`tools/call`、`ping` 与通知类报文。未引入 MCP SDK：该协议在这里只需要一层 JSON-RPC，
+自研实现避免了额外的版本对齐成本，且与内部编排共用同一个 `ToolRegistry`。
+
+```bash
+curl -s http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "X-MCP-Token: $PSY_MCP_TOKEN" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+`tools/call` 的返回同时给出 `content`（文本）、`structuredContent`（结构化数据）与 `isError`，
+便于不同类型的客户端消费。
+
+## 可观测与评测
+
+### 链路标识
+
+`TraceFilter` 为每个请求分配 `traceId`，写入日志 MDC 与响应头 `X-Trace-Id`；
+也接受上游传入的合法 ID，便于网关串联。SSE 回调运行在别的线程池，MDC 不会自动继承，
+因此编排层把 `traceId` 显式存进上下文，后续全部显式传递。
+
+每轮对话在所有终止路径（正常完成 / 客户端断开 / 超时 / 异常）写一条 `t_chat_trace`，
+记录路由、HITL、首字延迟、总耗时、节点耗时、引用数、工具名与风险等级。
+漏掉失败路径会让成功率虚高，而失败恰恰最需要被看见。观测表不存对话正文，
+正文只在 `t_message`，靠 `conversationId` 关联。
+
+### 看板
+
+前端「观测看板」展示四类路由分布、首字延迟 p50/p95、工具调用成功率与逐小时趋势。
+趋势按小时补齐零值桶——只返回"有数据的小时"会让刚启动的系统看起来像趋势功能坏了。
+
+### 评测与压测
+
+```bash
+python eval/run_eval.py   --base-url http://localhost:8080
+python eval/load_test.py  --base-url http://localhost:8080 --users 20 --per-user 3 --concurrency 10
+```
+
+- `eval/cases.json`：13 条对话用例 + 4 项 MCP 协议检查。断言只检查结构化契约
+  （route / steps / tools / citations / hitl / traceId / ttftMs），不比对模型措辞，换模型后结论稳定。
+- `eval/run_eval.py`：注册临时账号轮换调用，规避单人限流；输出 `eval/reports/eval-report.md`。
+- `eval/load_test.py`：并发压测完整链路（鉴权 → 编排 → 检索/工具 → 模型 → 落库 → 观测写入），
+  输出吞吐与延迟分位数到 `eval/reports/load-report.md`。
+
+本机实测（JDK 17 / MySQL 8 / Redis 8，真实模型接入）：评测 **17/17 通过**；
+压测 **60/60 成功**，吞吐 **4.69 req/s**，首字延迟 p50 **464ms**、p95 **855ms**。
+原始报告见 `eval/reports/`。
+
 ## 配置项
 
 | 配置 | 说明 | 默认值 |
@@ -324,6 +460,9 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 | `psy.rate-limit.chat-per-minute` | 单用户每分钟对话次数上限 | `10` |
 | `psy.jwt.secret` | 令牌签名密钥（HS256，至少 32 字节），生产环境通过 `PSY_JWT_SECRET` 注入 | 开发默认值 |
 | `psy.jwt.expiration` | 令牌有效期 | `2h` |
+| `psy.mcp.access-token` | MCP 端点访问令牌，生产环境通过 `PSY_MCP_TOKEN` 注入 | 开发默认值 |
+| `psy.alert.mail.enabled` | 是否启用邮件告警通道；关闭时只写结构化日志 | `false` |
+| `psy.alert.mail.to` / `from` / `host` / `port` | 告警邮件收件人与 SMTP 连接 | — |
 | `spring.datasource.*` | 数据库连接 | — |
 | `spring.data.redis.*` | Redis 连接 | — |
 
@@ -347,8 +486,8 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 - [x] 消息渲染：Markdown 与富文本安全处理
 - [x] 知识库检索与引用溯源
 - [x] 多智能体编排（分诊 / 检索 / 危机干预）
-- [ ] 工具调用与外部服务集成
-- [ ] 可观测性与效果评测
+- [x] 工具服务与 MCP 接入（量表 / 预约 / 统计 / 告警）
+- [x] 可观测性（traceId / 轨迹落库 / 看板）与效果评测、并发压测
 
 ## License
 

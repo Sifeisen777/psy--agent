@@ -40,6 +40,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- 危机告警邮件通道；默认关闭，仅提供 JavaMailSender 实现，不启动 SMTP 连接 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
         <!-- 鉴权：FilterChain + BCrypt（crypto 由 starter 传递引入） -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -2,6 +2,8 @@ package com.psyagent.bootstrap.controller;
 
 import com.psyagent.bootstrap.agent.AgentContext;
 import com.psyagent.bootstrap.agent.AgentOrchestrator;
+import com.psyagent.bootstrap.observability.ChatTraceRecorder;
+import com.psyagent.bootstrap.observability.TraceContext;
 import com.psyagent.bootstrap.security.CurrentUser;
 import com.psyagent.bootstrap.service.AuthService;
 import com.psyagent.bootstrap.service.ConversationMemoryService;
@@ -29,11 +31,12 @@ import reactor.core.Disposable;
 import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 对话入口。
@@ -43,6 +46,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>{@code POST /api/chat} —— 同步一次性返回。保留做联调与降级（模型不支持流式时），**不落库**。</li>
  *   <li>{@code POST /api/chat/stream} —— 正式通道，SSE 逐字输出并落库。</li>
  * </ul>
+ * 观测数据（t_chat_trace）在所有终止路径上写一次，包括客户端断开与超时。
  */
 @RestController
 @RequestMapping("/api/chat")
@@ -58,6 +62,7 @@ public class ChatController {
     private final ConversationService conversationService;
     private final ConversationMemoryService memoryService;
     private final AgentOrchestrator orchestrator;
+    private final ChatTraceRecorder traceRecorder;
     private final AuthService authService;
     private final int chatLimit;
     private final boolean emotionEnabled;
@@ -67,6 +72,7 @@ public class ChatController {
                           ConversationService conversationService,
                           ConversationMemoryService memoryService,
                           AgentOrchestrator orchestrator,
+                          ChatTraceRecorder traceRecorder,
                           AuthService authService,
                           @Value("${psy.rate-limit.chat-per-minute:10}") int chatLimit,
                           @Value("${psy.ai.emotion-enabled:true}") boolean emotionEnabled) {
@@ -75,6 +81,7 @@ public class ChatController {
         this.conversationService = conversationService;
         this.memoryService = memoryService;
         this.orchestrator = orchestrator;
+        this.traceRecorder = traceRecorder;
         this.authService = authService;
         this.chatLimit = chatLimit;
         this.emotionEnabled = emotionEnabled;
@@ -83,14 +90,15 @@ public class ChatController {
     /** 同步通道：只回内容，不落库。 */
     @PostMapping
     public R<ChatReply> chat(@RequestBody @Valid ChatRequest request) {
+        long startedAt = System.currentTimeMillis();
         Long userId = CurrentUser.id();
         checkRate(userId);
         authService.getById(userId);
 
-        AgentContext context = new AgentContext(userId, null, request.message(), List.of());
+        AgentContext context = new AgentContext(userId, null, request.message(),
+                List.of(), TraceContext.current());
         orchestrator.run(context);
 
-        long startedAt = System.currentTimeMillis();
         String reply;
         try {
             reply = aiChatFacade.chat(String.valueOf(userId), request.message(),
@@ -99,15 +107,21 @@ public class ChatController {
             throw e;
         } catch (RuntimeException e) {
             log.error("chat failed userId={}", userId, e);
+            traceRecorder.record(context, aiChatFacade.modelName(), !aiChatFacade.available(),
+                    (int) (System.currentTimeMillis() - startedAt), null, null, 0, false);
             throw BizException.of(ResultCode.AI_UNAVAILABLE);
         }
-        int cost = (int) (System.currentTimeMillis() - startedAt);
+        int modelCost = (int) (System.currentTimeMillis() - startedAt);
         EmotionAssessment emotion = emotionEnabled
                 ? aiChatFacade.assess(String.valueOf(userId), request.message())
                 : null;
-        return R.ok(new ChatReply(reply, aiChatFacade.modelName(), !aiChatFacade.available(), cost,
+        traceRecorder.record(context, aiChatFacade.modelName(), !aiChatFacade.available(),
+                modelCost, null, emotion == null ? null : emotion.riskLevel(),
+                reply.length(), false);
+        return R.ok(new ChatReply(reply, aiChatFacade.modelName(), !aiChatFacade.available(), modelCost,
                 emotion, context.citations(), context.getRoute().name(),
-                context.getTrace(), context.isHitlRequired()));
+                context.getTrace(), context.isHitlRequired(),
+                context.getTraceId(), context.toolViews()));
     }
 
     /**
@@ -115,11 +129,12 @@ public class ChatController {
      * <p>
      * 事件约定：
      * <pre>
-     * event: meta   data: {"conversationId":123,"title":"..."}   首帧，前端拿到会话 id
-     * event: delta  data: 文本片段                                多次
+     * event: meta   data: {"conversationId":123,"title":"...","traceId":"..."}   首帧
+     * event: delta  data: 文本片段                                                多次
      * event: done   data: {"costMs":2010,"length":180,"emotion":{...},"citations":[...],
-     *                      "route":"KNOWLEDGE","steps":[...],"hitl":false}  结束，附带编排轨迹
-     * event: error  data: 错误提示                                异常时
+     *                      "route":"KNOWLEDGE","steps":[...],"hitl":false,
+     *                      "traceId":"...","tools":[...],"ttftMs":980}          结束
+     * event: error  data: 错误提示                                                异常时
      * </pre>
      * 为什么用 SseEmitter 而不是直接返回 Flux：当前是 Servlet 栈（Tomcat），
      * 直接返回 Flux 需要引入 WebFlux 走响应式适配；SseEmitter 更贴近"Servlet 异步"的真相，
@@ -140,9 +155,9 @@ public class ChatController {
         List<org.springframework.ai.chat.messages.Message> history =
                 memoryService.loadHistory(conversation.getId());
 
-        // 编排：分诊 → 知识检索 / 危机干预，产出本轮的系统提示
+        // 编排：分诊 → 知识检索 / 危机干预 → 工具，产出本轮的系统提示
         AgentContext context = new AgentContext(userId, conversation.getId(),
-                request.message(), history);
+                request.message(), history, TraceContext.current());
         orchestrator.run(context);
 
         // 用户消息在调用模型前落库，确保模型异常时仍保留用户输入记录
@@ -153,6 +168,9 @@ public class ChatController {
         StringBuilder buffer = new StringBuilder();
         AtomicBoolean clientGone = new AtomicBoolean(false);
         AtomicBoolean saved = new AtomicBoolean(false);
+        AtomicBoolean traced = new AtomicBoolean(false);
+        AtomicInteger ttftMs = new AtomicInteger(-1);
+        AtomicReference<String> riskLevel = new AtomicReference<>();
         long start = System.currentTimeMillis();
 
         // 兜底保存：客户端断开 / 超时 / 异常 / 正常结束均会触发，CAS 保证只存一次。
@@ -170,13 +188,29 @@ public class ChatController {
             }
         };
 
+        // 观测轨迹同样覆盖所有终止路径。漏掉失败路径会让看板的成功率虚高，
+        // 而失败恰恰是最需要被看见的那部分。
+        Runnable traceOnce = () -> {
+            if (!traced.compareAndSet(false, true)) {
+                return;
+            }
+            int firstToken = ttftMs.get();
+            traceRecorder.record(context, aiChatFacade.modelName(), !aiChatFacade.available(),
+                    (int) (System.currentTimeMillis() - start),
+                    firstToken < 0 ? null : firstToken,
+                    riskLevel.get(), buffer.length(), clientGone.get());
+        };
+
         try {
             Map<String, Object> meta = new LinkedHashMap<>();
             meta.put("conversationId", conversation.getId());
             meta.put("title", conversation.getTitle());
+            meta.put("traceId", context.getTraceId());
             emitter.send(SseEmitter.event().name("meta").data(meta));
         } catch (IOException e) {
             log.warn("sse meta send failed, client gone before start");
+            saveOnce.run();
+            traceOnce.run();
             emitter.complete();
             return emitter;
         }
@@ -186,6 +220,7 @@ public class ChatController {
                 .subscribe(
                         chunk -> {
                             buffer.append(chunk);
+                            ttftMs.compareAndSet(-1, (int) (System.currentTimeMillis() - start));
                             if (clientGone.get()) {
                                 return;
                             }
@@ -200,6 +235,7 @@ public class ChatController {
                         error -> {
                             log.warn("sse stream error conversationId={}", conversation.getId(), error);
                             saveOnce.run();
+                            traceOnce.run();
                             if (!clientGone.get()) {
                                 try {
                                     emitter.send(SseEmitter.event().name("error").data("生成失败，请稍后重试"));
@@ -216,15 +252,16 @@ public class ChatController {
                             EmotionAssessment emotion = emotionEnabled
                                     ? aiChatFacade.assess(String.valueOf(userId), request.message())
                                     : null;
-                            try {
-                                if (emotion != null) {
+                            if (emotion != null) {
+                                riskLevel.set(emotion.riskLevel());
+                                try {
                                     conversationService.updateLastUserRiskLevel(
                                             conversation.getId(), emotion.riskLevel());
+                                } catch (Exception e) {
+                                    // 回填失败不影响主流程，风险等级可由日志与重放补齐
+                                    log.error("risk level update failed conversationId={}",
+                                            conversation.getId(), e);
                                 }
-                            } catch (Exception e) {
-                                // 回填失败不影响主流程，风险等级可由日志与重放补齐
-                                log.error("risk level update failed conversationId={}",
-                                        conversation.getId(), e);
                             }
                             if (!clientGone.get()) {
                                 try {
@@ -236,25 +273,33 @@ public class ChatController {
                                     done.put("route", context.getRoute().name());
                                     done.put("steps", context.getTrace());
                                     done.put("hitl", context.isHitlRequired());
+                                    done.put("traceId", context.getTraceId());
+                                    done.put("tools", context.toolViews());
+                                    int firstToken = ttftMs.get();
+                                    done.put("ttftMs", firstToken < 0 ? null : firstToken);
                                     emitter.send(SseEmitter.event().name("done").data(done));
                                 } catch (IOException ignored) {
                                     // 客户端已断开，无需再推
                                 }
                             }
+                            traceOnce.run();
                             emitter.complete();
                         }));
 
         emitter.onCompletion(() -> {
             saveOnce.run();
+            traceOnce.run();
             subscription.dispose();
         });
         emitter.onTimeout(() -> {
             log.warn("sse timeout conversationId={}", conversation.getId());
             saveOnce.run();
+            traceOnce.run();
             subscription.dispose();
         });
         emitter.onError(e -> {
             saveOnce.run();
+            traceOnce.run();
             subscription.dispose();
         });
         return emitter;
@@ -284,6 +329,7 @@ public class ChatController {
 
     public record ChatReply(String reply, String model, boolean mock, int costMs,
                             EmotionAssessment emotion, List<Map<String, Object>> citations,
-                            String route, List<AgentContext.AgentStep> steps, boolean hitl) {
+                            String route, List<AgentContext.AgentStep> steps, boolean hitl,
+                            String traceId, List<Map<String, Object>> tools) {
     }
 }

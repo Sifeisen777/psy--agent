@@ -13,6 +13,19 @@ psy:
     base-url: https://api.deepseek.com
     model: deepseek-chat
 
+  # MCP 端点独立令牌，外部模型客户端通过 X-MCP-Token 携带；生产环境务必替换
+  mcp:
+    access-token: dev-mcp-token
+
+  # 危机告警邮件通道：默认关闭，只写结构化日志 + 落库；开启前需配置可达的 SMTP
+  alert:
+    mail:
+      enabled: false
+      to:
+      from: psy-agent@localhost
+      host: localhost
+      port: 25
+
 spring:
   datasource:
     url: jdbc:mysql://localhost:3306/psy_agent?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true

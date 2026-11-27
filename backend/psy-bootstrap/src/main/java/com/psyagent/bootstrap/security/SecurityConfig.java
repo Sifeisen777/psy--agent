@@ -31,13 +31,15 @@ import java.nio.charset.StandardCharsets;
 @EnableConfigurationProperties(JwtProperties.class)
 public class SecurityConfig {
 
-    /** 无需认证即可访问的路径：探活、系统自检、注册与登录；/error 需放行以保留原始错误响应。 */
+    /** 无需认证即可访问的路径：探活、系统自检、注册与登录；/error 需放行以保留原始错误响应。
+     *  /mcp 走独立令牌（见 McpController），因为 MCP 客户端不携带本系统的 JWT。 */
     private static final String[] PUBLIC_PATHS = {
             "/api/system/ping",
             "/api/system/health",
             "/api/system/db-check",
             "/api/auth/register",
             "/api/auth/login",
+            "/mcp",
             "/actuator/**",
             "/error"
     };

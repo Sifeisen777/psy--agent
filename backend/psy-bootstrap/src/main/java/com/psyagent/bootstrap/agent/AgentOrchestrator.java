@@ -80,6 +80,25 @@ public class AgentOrchestrator {
                     4. 保持自然口语，不必每句都带编号。
                     """);
         }
+
+        // 工具结果放在最后：模型对提示末尾的遵循度最高。
+        // 危机路径刻意不注入——那轮只需要一句关心和一个电话，
+        // 告诉模型"告警已发出"会诱导它解释后台流程，反而偏离陪伴。
+        List<String> toolSummaries = context.toolSummaries();
+        if (!toolSummaries.isEmpty() && context.getRoute() != AgentRoute.CRISIS) {
+            sb.append("\n【本轮工具结果】以下是系统真实执行后返回的数据，回答必须与之保持一致：\n");
+            for (String summary : toolSummaries) {
+                sb.append("- ").append(summary).append('\n');
+            }
+            sb.append("不要编造工具没有返回的数字、编号或结论。\n");
+        }
+
+        if (!context.getGuidance().isEmpty()) {
+            sb.append("\n【本轮处理提示】\n");
+            for (String item : context.getGuidance()) {
+                sb.append("- ").append(item).append('\n');
+            }
+        }
         return sb.toString();
     }
 
