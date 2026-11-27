@@ -1,11 +1,27 @@
 <script setup>
 import { nextTick, onMounted, ref } from 'vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { del, get, streamChat } from '../api/client'
 
 defineProps({
   username: { type: String, default: '' }
 })
 const emit = defineEmits(['logout'])
+
+marked.setOptions({ breaks: true, gfm: true })
+
+/**
+ * 渲染模型输出的 Markdown。
+ * <p>
+ * 必须经过 DOMPurify 净化：模型输出属于不可信内容，一旦被注入
+ * `<img src=x onerror=...>` 之类的片段，直接 v-html 就是可执行的 XSS。
+ * 用户消息不走这里——用户自己的输入按纯文本处理，避免格式错乱与自我注入。
+ */
+function renderMarkdown(text) {
+  if (!text) return ''
+  return DOMPurify.sanitize(marked.parse(text))
+}
 
 const conversations = ref([])
 const currentId = ref(null)
@@ -256,8 +272,15 @@ function riskClass(level) {
         <div v-for="(msg, index) in messages" :key="index" class="msg" :class="msg.role">
           <div class="avatar">{{ msg.role === 'user' ? '我' : 'AI' }}</div>
           <div class="bubble-wrap">
-            <div class="bubble">
-              <span v-if="msg.content">{{ msg.content }}</span>
+            <div class="bubble" :class="{ md: msg.role === 'assistant' }">
+              <template v-if="msg.content">
+                <div
+                  v-if="msg.role === 'assistant'"
+                  class="md-body"
+                  v-html="renderMarkdown(msg.content)"
+                ></div>
+                <span v-else>{{ msg.content }}</span>
+              </template>
               <span v-else-if="msg.pending" class="typing"><i></i><i></i><i></i></span>
             </div>
             <div

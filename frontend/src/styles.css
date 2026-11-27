@@ -511,6 +511,102 @@ textarea {
   color: #fff;
 }
 
+/* Markdown 渲染区：气泡默认 pre-wrap 会把标签间空白也保留，这里改回正常流 */
+.bubble.md {
+  white-space: normal;
+}
+
+.md-body > :first-child {
+  margin-top: 0;
+}
+
+.md-body > :last-child {
+  margin-bottom: 0;
+}
+
+.md-body p {
+  margin: 0 0 8px;
+  line-height: 1.75;
+}
+
+.md-body ul,
+.md-body ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.md-body li {
+  margin-bottom: 4px;
+  line-height: 1.7;
+}
+
+.md-body strong {
+  font-weight: 600;
+}
+
+.md-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f1efeb;
+  color: #7a4a3a;
+}
+
+.md-body pre {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f6f4f1;
+  border: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.md-body pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.md-body blockquote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--line);
+  color: var(--ink-soft);
+}
+
+.md-body a {
+  color: #3f6354;
+  text-decoration: underline;
+}
+
+.md-body h1,
+.md-body h2,
+.md-body h3 {
+  margin: 10px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.md-body table {
+  border-collapse: collapse;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+}
+
+.md-body th,
+.md-body td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+}
+
+.md-body hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 10px 0;
+}
+
 /* 三点跳动：等待首个 token 时的占位 */
 .typing {
   display: inline-flex;
