@@ -64,6 +64,11 @@ psy:
   # 对话接口限流：单人每分钟最多 10 次，防刷、防误触、也防模型账单失控
   rate-limit:
     chat-per-minute: ${CHAT_RATE_LIMIT:10}
+  # 访问令牌：HS256 要求密钥至少 32 字节，生产环境务必通过环境变量覆盖
+  jwt:
+    secret: ${PSY_JWT_SECRET:psy-agent-dev-secret-key-change-before-production}
+    expiration: 2h
+    issuer: psy-agent
 
 management:
   endpoints:

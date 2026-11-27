@@ -1,5 +1,6 @@
 package com.psyagent.bootstrap.controller;
 
+import com.psyagent.bootstrap.security.CurrentUser;
 import com.psyagent.bootstrap.service.AuthService;
 import com.psyagent.bootstrap.service.ConversationService;
 import com.psyagent.common.api.R;
@@ -10,7 +11,6 @@ import com.psyagent.store.entity.Conversation;
 import com.psyagent.store.ratelimit.RedisRateLimiter;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,17 +67,18 @@ public class ChatController {
     /** 同步通道：只回内容，不落库。 */
     @PostMapping
     public R<ChatReply> chat(@RequestBody @Valid ChatRequest request) {
-        checkRate(request.userId());
-        authService.getById(request.userId());
+        Long userId = CurrentUser.id();
+        checkRate(userId);
+        authService.getById(userId);
 
         long startedAt = System.currentTimeMillis();
         String reply;
         try {
-            reply = aiChatFacade.chat(String.valueOf(request.userId()), request.message());
+            reply = aiChatFacade.chat(String.valueOf(userId), request.message());
         } catch (BizException e) {
             throw e;
         } catch (RuntimeException e) {
-            log.error("chat failed userId={}", request.userId(), e);
+            log.error("chat failed userId={}", userId, e);
             throw BizException.of(ResultCode.AI_UNAVAILABLE);
         }
         int cost = (int) (System.currentTimeMillis() - startedAt);
@@ -100,16 +101,17 @@ public class ChatController {
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(@RequestBody @Valid StreamRequest request) {
-        checkRate(request.userId());
-        // 用户必须真实存在：否则任意 userId 都能创建会话，产生孤儿数据且绕过归属校验
-        authService.getById(request.userId());
+        Long userId = CurrentUser.id();
+        checkRate(userId);
+        // 令牌未过期但账号已注销时，仍需拒绝
+        authService.getById(userId);
 
         Conversation conversation = request.conversationId() == null
-                ? conversationService.create(request.userId(), request.message())
-                : conversationService.getOwned(request.conversationId(), request.userId());
+                ? conversationService.create(userId, request.message())
+                : conversationService.getOwned(request.conversationId(), userId);
 
         // 用户消息在调用模型前落库，确保模型异常时仍保留用户输入记录
-        conversationService.appendMessage(conversation.getId(), request.userId(),
+        conversationService.appendMessage(conversation.getId(), userId,
                 "user", request.message(), null, null);
 
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
@@ -125,7 +127,7 @@ public class ChatController {
                 return;
             }
             try {
-                conversationService.appendMessage(conversation.getId(), request.userId(),
+                conversationService.appendMessage(conversation.getId(), userId,
                         "assistant", buffer.toString(), aiChatFacade.modelName(),
                         (int) (System.currentTimeMillis() - start));
             } catch (Exception e) {
@@ -145,7 +147,7 @@ public class ChatController {
         }
 
         Disposable subscription = aiChatFacade
-                .streamChat(String.valueOf(request.userId()), request.message())
+                .streamChat(String.valueOf(userId), request.message())
                 .subscribe(
                         chunk -> {
                             buffer.append(chunk);
@@ -210,14 +212,8 @@ public class ChatController {
         }
     }
 
-    /**
-     * 同步请求体。
-     * <p>
-     * userId 从 String 收紧为 Long：它直接参与会话归属校验，
-     * 允许任意字符串等于把越权访问的入口敞开。
-     */
+    /** 同步请求体。用户身份来自访问令牌，请求体不再携带 userId。 */
     public record ChatRequest(
-            @NotNull(message = "userId 不能为空") Long userId,
             @NotBlank(message = "message 不能为空")
             @Size(max = 2000, message = "单条消息不能超过 2000 字") String message
     ) {
@@ -225,7 +221,6 @@ public class ChatController {
 
     /** 流式请求体：conversationId 为空表示新建会话。 */
     public record StreamRequest(
-            @NotNull(message = "userId 不能为空") Long userId,
             Long conversationId,
             @NotBlank(message = "message 不能为空")
             @Size(max = 2000, message = "单条消息不能超过 2000 字") String message

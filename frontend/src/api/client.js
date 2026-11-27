@@ -1,7 +1,43 @@
 const BASE = '/api'
+const TOKEN_KEY = 'psy.token'
+const USER_KEY = 'psy.username'
 
-/** 后端统一响应体：{ code, message, data, ts }，code !== 0 即为业务失败 */
+/** 登录态失效时广播，由外层回到登录页 */
+export const UNAUTHORIZED_EVENT = 'psy:unauthorized'
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || ''
+}
+
+export function getUsername() {
+  return localStorage.getItem(USER_KEY) || ''
+}
+
+export function saveAuth(token, username) {
+  localStorage.setItem(TOKEN_KEY, token)
+  localStorage.setItem(USER_KEY, username)
+}
+
+export function clearAuth() {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(USER_KEY)
+}
+
+function authHeaders(extra = {}) {
+  const token = getToken()
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : extra
+}
+
+function notifyUnauthorized() {
+  clearAuth()
+  window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+}
+
 async function unwrap(res) {
+  if (res.status === 401) {
+    notifyUnauthorized()
+    throw new Error('登录已过期，请重新登录')
+  }
   const body = await res.json().catch(() => null)
   if (!body) {
     throw new Error(`响应解析失败（HTTP ${res.status}）`)
@@ -15,33 +51,47 @@ async function unwrap(res) {
 }
 
 export async function get(path) {
-  return unwrap(await fetch(BASE + path))
+  return unwrap(await fetch(BASE + path, { headers: authHeaders() }))
 }
 
 export async function post(path, payload) {
   return unwrap(await fetch(BASE + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: payload === undefined ? undefined : JSON.stringify(payload)
+  }))
+}
+
+/** 登录与注册接口不携带令牌 */
+export async function postAnonymous(path, payload) {
+  return unwrap(await fetch(BASE + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
   }))
 }
 
 /**
  * 流式对话。
  *
- * 为什么不用 EventSource：它只能发 GET，而我们的接口是 POST + JSON body。
- * 所以用 fetch + ReadableStream 手动解析 SSE 帧。
- *
- * 注意：限流、用户不存在这类错误在建立流之前就返回了 JSON（HTTP 200 + code!=0），
- * 必须靠 Content-Type 区分，不能只看 res.ok。
+ * 使用 fetch + ReadableStream 而非 EventSource：后者仅支持 GET，无法传递 JSON 请求体与认证头。
+ * 鉴权失败等错误在建立流之前以 JSON 返回，需通过 Content-Type 区分。
  */
-export async function streamChat({ userId, conversationId, message, signal, onMeta, onDelta, onDone }) {
+export async function streamChat({ conversationId, message, signal, onMeta, onDelta, onDone }) {
   const res = await fetch(BASE + '/chat/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({ userId, conversationId, message }),
+    headers: authHeaders({
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream'
+    }),
+    body: JSON.stringify({ conversationId, message }),
     signal
   })
+
+  if (res.status === 401) {
+    notifyUnauthorized()
+    throw new Error('登录已过期，请重新登录')
+  }
 
   const contentType = res.headers.get('content-type') || ''
   if (!contentType.includes('text/event-stream')) {
@@ -62,17 +112,24 @@ export async function streamChat({ userId, conversationId, message, signal, onMe
       if (line.startsWith('event:')) {
         event = line.slice(6).trim()
       } else if (line.startsWith('data:')) {
-        // SSE 规范：data: 后可能有一个空格，去掉它，但保留正文前导空格
         dataLines.push(line.slice(5).replace(/^ /, ''))
       }
     }
     const data = dataLines.join('\n')
     if (event === 'meta') {
-      try { onMeta?.(JSON.parse(data)) } catch { /* 忽略坏帧 */ }
+      try {
+        onMeta?.(JSON.parse(data))
+      } catch {
+        // 忽略无法解析的帧
+      }
     } else if (event === 'delta') {
       onDelta?.(data)
     } else if (event === 'done') {
-      try { onDone?.(JSON.parse(data)) } catch { onDone?.({}) }
+      try {
+        onDone?.(JSON.parse(data))
+      } catch {
+        onDone?.({})
+      }
     } else if (event === 'error') {
       throw new Error(data || '生成失败')
     }

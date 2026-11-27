@@ -2,8 +2,8 @@
 import { nextTick, onMounted, ref } from 'vue'
 import { get, streamChat } from '../api/client'
 
-const props = defineProps({
-  userId: { type: String, required: true }
+defineProps({
+  username: { type: String, default: '' }
 })
 const emit = defineEmits(['logout'])
 
@@ -21,7 +21,7 @@ onMounted(loadConversations)
 
 async function loadConversations() {
   try {
-    conversations.value = await get(`/conversation/list?userId=${props.userId}`)
+    conversations.value = await get('/conversation/list')
   } catch (e) {
     error.value = e.message
   }
@@ -33,7 +33,7 @@ async function openConversation(item) {
   error.value = ''
   lastCost.value = null
   try {
-    messages.value = await get(`/conversation/${item.id}/messages?userId=${props.userId}`)
+    messages.value = await get(`/conversation/${item.id}/messages`)
     scrollToBottom(true)
   } catch (e) {
     error.value = e.message
@@ -69,9 +69,6 @@ async function send() {
 
   try {
     await streamChat({
-      // userId 必须保持字符串：雪花 ID 有 19 位，Number() 会丢精度（末位被四舍五入），
-      // 后端就会报「用户不存在」——这是"能进去但发消息失败"的经典原因
-      userId: props.userId,
       conversationId: currentId.value,
       message: text,
       signal: abort.signal,
@@ -137,7 +134,7 @@ function formatTime(value) {
     <aside class="sidebar">
       <div class="brand">
         <strong>psy-agent</strong>
-        <span class="uid">uid {{ userId }}</span>
+        <span class="uid">{{ username }}</span>
       </div>
 
       <button class="new-chat" :disabled="streaming" @click="newConversation">+ 新建对话</button>
