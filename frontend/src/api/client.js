@@ -62,6 +62,13 @@ export async function post(path, payload) {
   }))
 }
 
+export async function del(path) {
+  return unwrap(await fetch(BASE + path, {
+    method: 'DELETE',
+    headers: authHeaders()
+  }))
+}
+
 /** 登录与注册接口不携带令牌 */
 export async function postAnonymous(path, payload) {
   return unwrap(await fetch(BASE + path, {

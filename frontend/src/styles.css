@@ -240,13 +240,14 @@ textarea {
 }
 
 .conv-item {
-  text-align: left;
-  background: transparent;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 9px 10px;
   border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .conv-item:hover {
@@ -255,6 +256,40 @@ textarea {
 
 .conv-item.active {
   background: var(--brand-soft);
+}
+
+.conv-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.conv-del {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 15px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.conv-item:hover .conv-del,
+.conv-item.active .conv-del,
+.conv-del:focus-visible {
+  opacity: 1;
+}
+
+.conv-del:hover:not(:disabled) {
+  background: #f0dcd9;
+  color: var(--danger);
 }
 
 .conv-title {

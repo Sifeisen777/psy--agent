@@ -1,6 +1,6 @@
 <script setup>
 import { nextTick, onMounted, ref } from 'vue'
-import { get, streamChat } from '../api/client'
+import { del, get, streamChat } from '../api/client'
 
 defineProps({
   username: { type: String, default: '' }
@@ -47,6 +47,42 @@ function newConversation() {
   input.value = ''
   error.value = ''
   lastCost.value = null
+}
+
+/**
+ * 删除会话。生成中不允许删除，避免流式回调把消息写回已删除的会话。
+ */
+async function removeConversation(item, event) {
+  event.stopPropagation()
+  if (streaming.value) {
+    error.value = '请先停止当前生成，再删除会话'
+    return
+  }
+  if (!window.confirm(`删除「${item.title || '未命名对话'}」？该会话将从列表移除。`)) {
+    return
+  }
+  try {
+    await del(`/conversation/${item.id}`)
+    conversations.value = conversations.value.filter((c) => c.id !== item.id)
+    if (currentId.value === item.id) {
+      newConversation()
+    }
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+/**
+ * 输入框键盘行为：Enter 发送，Shift + Enter 换行。
+ * <p>
+ * 中文输入法组合期间按 Enter 是"确认候选词"，此时必须放行，
+ * 否则选词会被误当成发送。isComposing 与 keyCode 229 用于覆盖不同浏览器的实现差异。
+ */
+function onKeydown(e) {
+  if (e.key !== 'Enter' || e.shiftKey) return
+  if (e.isComposing || e.keyCode === 229) return
+  e.preventDefault()
+  send()
 }
 
 async function send() {
@@ -147,16 +183,25 @@ function formatTime(value) {
       <button class="new-chat" :disabled="streaming" @click="newConversation">+ 新建对话</button>
 
       <div class="conv-list">
-        <button
+        <div
           v-for="item in conversations"
           :key="item.id"
           class="conv-item"
           :class="{ active: item.id === currentId }"
           @click="openConversation(item)"
         >
-          <span class="conv-title">{{ item.title || '未命名对话' }}</span>
-          <span class="conv-meta">{{ item.messageCount }} 条 · {{ formatTime(item.lastMessageAt) }}</span>
-        </button>
+          <div class="conv-body">
+            <span class="conv-title">{{ item.title || '未命名对话' }}</span>
+            <span class="conv-meta">{{ item.messageCount }} 条 · {{ formatTime(item.lastMessageAt) }}</span>
+          </div>
+          <button
+            class="conv-del"
+            title="删除会话"
+            aria-label="删除会话"
+            :disabled="streaming"
+            @click="removeConversation(item, $event)"
+          >×</button>
+        </div>
         <p v-if="!conversations.length" class="empty">还没有对话，直接开始聊吧</p>
       </div>
     </aside>
@@ -191,8 +236,8 @@ function formatTime(value) {
           v-model="input"
           rows="2"
           maxlength="2000"
-          placeholder="说说你现在的心情…（Ctrl + Enter 发送）"
-          @keydown.ctrl.enter.prevent="send"
+          placeholder="说说你现在的心情…（Enter 发送，Shift + Enter 换行）"
+          @keydown="onKeydown"
         ></textarea>
         <button v-if="!streaming" class="primary" :disabled="!input.trim()" @click="send">发送</button>
         <button v-else class="danger" @click="stop">停止</button>
