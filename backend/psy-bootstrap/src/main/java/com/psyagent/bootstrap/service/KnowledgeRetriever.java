@@ -123,8 +123,8 @@ public class KnowledgeRetriever {
     }
 
     /** 判断问题是否落在本知识库的领域内。宁可漏检交给模型常识回答，也不要给出无中生有的引用。 */
-    static boolean inDomain(String query) {
-        return DOMAIN_TERMS.stream().anyMatch(query::contains);
+    public static boolean inDomain(String query) {
+        return query != null && DOMAIN_TERMS.stream().anyMatch(query::contains);
     }
 
     /**

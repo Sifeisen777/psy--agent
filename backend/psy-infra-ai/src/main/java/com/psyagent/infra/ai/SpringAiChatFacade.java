@@ -65,18 +65,17 @@ public class SpringAiChatFacade implements AiChatFacade {
     }
 
     @Override
-    public String chat(String userId, String message, List<Message> history, List<String> references) {
+    public String chat(String userId, String message, List<Message> history, String systemPrompt) {
         long start = System.currentTimeMillis();
         try {
             ChatClient.ChatClientRequestSpec spec = chatClient.prompt()
                     .messages(withCurrentMessage(history, message));
-            String system = composeSystem(references);
-            if (system != null) {
-                spec = spec.system(system);
+            if (systemPrompt != null && !systemPrompt.isBlank()) {
+                spec = spec.system(systemPrompt);
             }
             String content = spec.call().content();
-            log.info("ai call ok user={} model={} refs={} cost={}ms", userId, properties.model(),
-                    references == null ? 0 : references.size(), System.currentTimeMillis() - start);
+            log.info("ai call ok user={} model={} cost={}ms", userId, properties.model(),
+                    System.currentTimeMillis() - start);
             return content;
         } catch (RuntimeException e) {
             long cost = System.currentTimeMillis() - start;
@@ -92,13 +91,12 @@ public class SpringAiChatFacade implements AiChatFacade {
 
     @Override
     public Flux<String> streamChat(String userId, String message, List<Message> history,
-                                   List<String> references) {
+                                   String systemPrompt) {
         long start = System.currentTimeMillis();
         ChatClient.ChatClientRequestSpec spec = chatClient.prompt()
                 .messages(withCurrentMessage(history, message));
-        String system = composeSystem(references);
-        if (system != null) {
-            spec = spec.system(system);
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            spec = spec.system(systemPrompt);
         }
         return spec.stream()
                 .content()
@@ -211,33 +209,5 @@ public class SpringAiChatFacade implements AiChatFacade {
         List<Message> messages = new ArrayList<>(history == null ? List.of() : history);
         messages.add(new UserMessage(message));
         return messages;
-    }
-
-    /**
-     * 拼装系统提示词：人设 + 检索到的资料 + 引用要求。
-     * <p>
-     * 参考资料放在系统提示而不是用户消息里，原因有两个：
-     * 用户消息要原样落库（审计与回溯），拼接后会把检索内容也写进对话历史；
-     * 系统提示在每轮都会被重新构造，不占用历史窗口。
-     *
-     * @return null 表示本轮无检索结果，沿用配置中的默认人设
-     */
-    private String composeSystem(List<String> references) {
-        if (references == null || references.isEmpty()) {
-            return null;
-        }
-        StringBuilder sb = new StringBuilder(properties.systemPrompt());
-        sb.append("\n\n【参考资料】以下是与本轮问题相关的知识片段，按编号排列：\n");
-        for (int i = 0; i < references.size(); i++) {
-            sb.append('[').append(i + 1).append("] ").append(references.get(i)).append('\n');
-        }
-        sb.append("""
-                【引用要求】
-                1. 优先依据参考资料作答；资料未覆盖的部分可以给通用建议，但不得编造成资料中的内容；
-                2. 引用到某条资料时，在该句末尾标注编号，如 [1]；
-                3. 多条资料重复时合并表达，不要逐条复述；
-                4. 保持自然口语，不必每句都带编号。
-                """);
-        return sb.toString();
     }
 }

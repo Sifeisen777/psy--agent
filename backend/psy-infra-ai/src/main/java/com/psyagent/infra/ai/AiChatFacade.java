@@ -8,8 +8,12 @@ import java.util.List;
 /**
  * AI 对话门面。
  * <p>
- * 上层（Controller / 未来的 Agent 编排层）只依赖这个接口，不直接依赖 ChatClient：
- * 后续把单模型调用替换为多智能体编排时，上层代码无需改动；
+ * 职责边界：只负责"把一次对话交给模型并取回结果"，不决定对话策略。
+ * 人设、检索资料、风险约束等系统提示由上层编排层拼装后传入，
+ * 这样同一模型可以被不同策略复用，门面不必随业务规则变化而修改。
+ * <p>
+ * 上层（Controller / Agent 编排层）只依赖这个接口，不直接依赖 ChatClient：
+ * 替换模型提供方或引入多智能体编排时，业务代码无需改动；
  * 单元测试也可注入假实现，无需启动 Spring 上下文。
  */
 public interface AiChatFacade {
@@ -20,37 +24,33 @@ public interface AiChatFacade {
     /** 当前使用的模型标识，Mock 模式返回 "mock"。 */
     String modelName();
 
-    /**
-     * 同步对话（无参考资料）。
-     */
+    /** 同步对话，使用配置中的默认系统提示。 */
     default String chat(String userId, String message, List<Message> history) {
-        return chat(userId, message, history, List.of());
+        return chat(userId, message, history, null);
     }
 
     /**
      * 同步对话。
      *
-     * @param userId     用户标识，用于日志与限流隔离
-     * @param message    本轮用户输入
-     * @param history    历史消息，按时间正序，不包含本轮输入；实现方负责追加本轮消息
-     * @param references 检索到的知识片段，按相关度降序；为空表示本轮不启用检索增强
+     * @param userId       用户标识，用于日志与限流隔离
+     * @param message      本轮用户输入
+     * @param history      历史消息，按时间正序，不包含本轮输入；实现方负责追加本轮消息
+     * @param systemPrompt 完整系统提示（人设 + 策略 + 参考资料）；为 null 时使用配置中的默认人设
      * @return 模型回复
      */
-    String chat(String userId, String message, List<Message> history, List<String> references);
+    String chat(String userId, String message, List<Message> history, String systemPrompt);
 
-    /**
-     * 流式对话（无参考资料）。
-     */
+    /** 流式对话，使用配置中的默认系统提示。 */
     default Flux<String> streamChat(String userId, String message, List<Message> history) {
-        return streamChat(userId, message, history, List.of());
+        return streamChat(userId, message, history, null);
     }
 
     /**
      * 流式对话。每个元素为增量片段，由调用方拼接并推送，门面层不关心传输方式。
      *
-     * @param references 语义同 {@link #chat(String, String, List, List)}
+     * @param systemPrompt 语义同 {@link #chat(String, String, List, String)}
      */
-    Flux<String> streamChat(String userId, String message, List<Message> history, List<String> references);
+    Flux<String> streamChat(String userId, String message, List<Message> history, String systemPrompt);
 
     /**
      * 真实探活：使用当前密钥发起一次最小请求，确认模型侧可用。

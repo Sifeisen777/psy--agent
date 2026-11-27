@@ -510,6 +510,41 @@ textarea {
   margin-left: 2px;
 }
 
+/* 编排轨迹：展示本轮经过哪些节点，用于验证路由与检索是否按预期生效 */
+.trace {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.trace-label {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #eef3f0;
+  color: #4d6a5c;
+}
+
+.trace-route {
+  font-weight: 600;
+  color: #3f6354;
+}
+
+.trace-arrow {
+  color: #c3c0ba;
+}
+
+.trace-step {
+  color: var(--ink-soft);
+}
+
+.trace-step em {
+  font-style: normal;
+  color: #8b8781;
+}
+
 .crisis {
   margin: 0 24px 8px;
   padding: 10px 14px;

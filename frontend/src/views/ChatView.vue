@@ -144,11 +144,15 @@ async function send() {
         if (info.citations?.length) {
           reply.citations = info.citations
         }
+        if (info.route) {
+          reply.route = info.route
+          reply.steps = info.steps || []
+        }
         if (info.emotion) {
           // 评估结果描述的是用户此刻的状态，挂到用户这条消息上
           userMsg.emotion = info.emotion
           userMsg.riskLevel = info.emotion.riskLevel
-          crisisAlert.value = info.emotion.riskLevel === 'HIGH'
+          crisisAlert.value = info.hitl || info.emotion.riskLevel === 'HIGH'
         }
         reply.pending = false
       }
@@ -224,6 +228,17 @@ function citationGroups(citations) {
     groups.get(item.title).push(item.index)
   }
   return [...groups.entries()].map(([title, indexes]) => ({ title, indexes }))
+}
+
+const ROUTE_TEXT = {
+  CRISIS: '危机干预',
+  KNOWLEDGE: '知识问答',
+  EMOTION: '情绪支持',
+  SMALLTALK: '简短寒暄'
+}
+
+function routeText(route) {
+  return ROUTE_TEXT[route] || route
 }
 </script>
 
@@ -314,6 +329,16 @@ function citationGroups(citations) {
                 {{ group.title }}
                 <em v-for="i in group.indexes" :key="i">[{{ i }}]</em>
               </span>
+            </div>
+            <div v-if="msg.route" class="trace">
+              <span class="trace-label">处理路径</span>
+              <span class="trace-route">{{ routeText(msg.route) }}</span>
+              <template v-for="(step, i) in msg.steps" :key="i">
+                <span class="trace-arrow">›</span>
+                <span class="trace-step">
+                  {{ step.node }}<em v-if="step.detail"> {{ step.detail }}</em>
+                </span>
+              </template>
             </div>
             <div
               v-if="msg.emotion || msg.riskLevel"
