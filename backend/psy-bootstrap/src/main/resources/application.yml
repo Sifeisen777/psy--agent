@@ -24,9 +24,8 @@ spring:
     validate-on-migrate: true
 
   # ---- Spring AI：OpenAI 兼容协议 ----
-  # 单一配置源：一律由 psy.ai.* 派生。曾经这里和 psy.ai.api-key 各写一份，
-  # 结果用户在 local 里只填了 psy.ai.api-key，此处仍取到 sk-placeholder，
-  # 启动毫无异常、一调用就 401 —— 典型的"双轨配置"事故。
+  # 单一配置源：统一由 psy.ai.* 派生。
+  # 若两处分别配置，仅修改其一会导致密钥不一致——启动正常，调用时返回 401。
   ai:
     openai:
       api-key: ${psy.ai.api-key}

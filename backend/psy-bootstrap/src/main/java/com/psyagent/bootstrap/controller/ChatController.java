@@ -108,7 +108,7 @@ public class ChatController {
                 ? conversationService.create(request.userId(), request.message())
                 : conversationService.getOwned(request.conversationId(), request.userId());
 
-        // 用户消息先落库：即使模型失败也要留痕（心理场景下"用户说了什么"比"AI 回了什么"更重要）
+        // 用户消息在调用模型前落库，确保模型异常时仍保留用户输入记录
         conversationService.appendMessage(conversation.getId(), request.userId(),
                 "user", request.message(), null, null);
 
@@ -118,9 +118,8 @@ public class ChatController {
         AtomicBoolean saved = new AtomicBoolean(false);
         long start = System.currentTimeMillis();
 
-        // 兜底保存：客户端断开 / 超时 / 异常 / 正常结束都可能触发，CAS 保证只存一次。
-        // 为什么必须兜底：dispose 订阅后 onComplete 不再执行。实测发现用户一刷新页面，
-        // 已生成的内容就全丢了——只靠 onComplete 落库是不可靠的。
+        // 兜底保存：客户端断开 / 超时 / 异常 / 正常结束均会触发，CAS 保证只存一次。
+        // dispose 订阅后 onComplete 不再执行，仅依赖完成回调会在客户端断连时丢失已生成内容。
         Runnable saveOnce = () -> {
             if (buffer.isEmpty() || !saved.compareAndSet(false, true)) {
                 return;

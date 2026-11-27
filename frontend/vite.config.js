@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import http from 'node:http'
 
-// 后端端口经常变（8080 被占用时常用 180xx），写死代理目标会反复踩坑。
+// 后端端口不固定（8080 被占用时常用 180xx），写死代理目标会导致连通失败。
 // 探测优先级：环境变量 VITE_API_TARGET > 自动探测 > 兜底 8080
 const CANDIDATE_PORTS = [8080, 18080, 18087, 18088, 18089]
 

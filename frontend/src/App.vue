@@ -33,7 +33,7 @@ async function enter() {
   error.value = ''
   try {
     // 先探一次会话列表：userId 不存在会返回 40400，
-    // 这样在入口处就能报错，而不是进去发第一条消息才发现
+    // 在入口处校验并提示，避免进入会话后首个请求才失败
     await get(`/conversation/list?userId=${value}`)
     commit(value)
   } catch (e) {
