@@ -141,6 +141,9 @@ async function send() {
       },
       onDone: (info) => {
         lastCost.value = info
+        if (info.citations?.length) {
+          reply.citations = info.citations
+        }
         if (info.emotion) {
           // 评估结果描述的是用户此刻的状态，挂到用户这条消息上
           userMsg.emotion = info.emotion
@@ -206,6 +209,21 @@ function riskText(level) {
 
 function riskClass(level) {
   return 'risk-' + String(level || 'LOW').toLowerCase()
+}
+
+/**
+ * 引用按文档合并：同一篇可能命中多个片段，逐条列出会让来源标签变得很长。
+ * 合并后显示为「标题 [1][2]」，与回答中的编号对应。
+ */
+function citationGroups(citations) {
+  const groups = new Map()
+  for (const item of citations || []) {
+    if (!groups.has(item.title)) {
+      groups.set(item.title, [])
+    }
+    groups.get(item.title).push(item.index)
+  }
+  return [...groups.entries()].map(([title, indexes]) => ({ title, indexes }))
 }
 </script>
 
@@ -282,6 +300,20 @@ function riskClass(level) {
                 <span v-else>{{ msg.content }}</span>
               </template>
               <span v-else-if="msg.pending" class="typing"><i></i><i></i><i></i></span>
+            </div>
+            <div
+              v-if="msg.citations?.length"
+              class="citations"
+            >
+              <span class="citations-label">参考</span>
+              <span
+                v-for="group in citationGroups(msg.citations)"
+                :key="group.title"
+                class="citation-item"
+              >
+                {{ group.title }}
+                <em v-for="i in group.indexes" :key="i">[{{ i }}]</em>
+              </span>
             </div>
             <div
               v-if="msg.emotion || msg.riskLevel"

@@ -4,6 +4,7 @@ import com.psyagent.bootstrap.security.CurrentUser;
 import com.psyagent.bootstrap.service.AuthService;
 import com.psyagent.bootstrap.service.ConversationMemoryService;
 import com.psyagent.bootstrap.service.ConversationService;
+import com.psyagent.bootstrap.service.KnowledgeRetriever;
 import com.psyagent.common.api.R;
 import com.psyagent.common.api.ResultCode;
 import com.psyagent.common.exception.BizException;
@@ -11,6 +12,7 @@ import com.psyagent.infra.ai.AiChatFacade;
 import com.psyagent.infra.ai.EmotionAssessment;
 import com.psyagent.store.entity.Conversation;
 import com.psyagent.store.ratelimit.RedisRateLimiter;
+import com.psyagent.store.search.KnowledgeHit;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -27,6 +29,7 @@ import reactor.core.Disposable;
 import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,24 +57,30 @@ public class ChatController {
     private final RedisRateLimiter rateLimiter;
     private final ConversationService conversationService;
     private final ConversationMemoryService memoryService;
+    private final KnowledgeRetriever knowledgeRetriever;
     private final AuthService authService;
     private final int chatLimit;
     private final boolean emotionEnabled;
+    private final boolean knowledgeEnabled;
 
     public ChatController(AiChatFacade aiChatFacade,
                           RedisRateLimiter rateLimiter,
                           ConversationService conversationService,
                           ConversationMemoryService memoryService,
+                          KnowledgeRetriever knowledgeRetriever,
                           AuthService authService,
                           @Value("${psy.rate-limit.chat-per-minute:10}") int chatLimit,
-                          @Value("${psy.ai.emotion-enabled:true}") boolean emotionEnabled) {
+                          @Value("${psy.ai.emotion-enabled:true}") boolean emotionEnabled,
+                          @Value("${psy.knowledge.enabled:true}") boolean knowledgeEnabled) {
         this.aiChatFacade = aiChatFacade;
         this.rateLimiter = rateLimiter;
         this.conversationService = conversationService;
         this.memoryService = memoryService;
+        this.knowledgeRetriever = knowledgeRetriever;
         this.authService = authService;
         this.chatLimit = chatLimit;
         this.emotionEnabled = emotionEnabled;
+        this.knowledgeEnabled = knowledgeEnabled;
     }
 
     /** 同步通道：只回内容，不落库。 */
@@ -81,10 +90,13 @@ public class ChatController {
         checkRate(userId);
         authService.getById(userId);
 
+        List<KnowledgeHit> hits = retrieve(request.message());
+        List<String> refs = toReferences(hits);
+
         long startedAt = System.currentTimeMillis();
         String reply;
         try {
-            reply = aiChatFacade.chat(String.valueOf(userId), request.message(), List.of());
+            reply = aiChatFacade.chat(String.valueOf(userId), request.message(), List.of(), refs);
         } catch (BizException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -95,7 +107,8 @@ public class ChatController {
         EmotionAssessment emotion = emotionEnabled
                 ? aiChatFacade.assess(String.valueOf(userId), request.message())
                 : null;
-        return R.ok(new ChatReply(reply, aiChatFacade.modelName(), !aiChatFacade.available(), cost, emotion));
+        return R.ok(new ChatReply(reply, aiChatFacade.modelName(), !aiChatFacade.available(), cost,
+                emotion, toCitations(hits)));
     }
 
     /**
@@ -126,6 +139,10 @@ public class ChatController {
         // 历史必须在写入本轮消息之前加载，否则当前输入会重复出现在上下文中
         List<org.springframework.ai.chat.messages.Message> history =
                 memoryService.loadHistory(conversation.getId());
+
+        // 检索放在用户消息落库之前，与历史加载同理：语义上属于"为本轮输入找资料"
+        List<KnowledgeHit> hits = retrieve(request.message());
+        List<String> refs = toReferences(hits);
 
         // 用户消息在调用模型前落库，确保模型异常时仍保留用户输入记录
         conversationService.appendMessage(conversation.getId(), userId,
@@ -164,7 +181,7 @@ public class ChatController {
         }
 
         Disposable subscription = aiChatFacade
-                .streamChat(String.valueOf(userId), request.message(), history)
+                .streamChat(String.valueOf(userId), request.message(), history, refs)
                 .subscribe(
                         chunk -> {
                             buffer.append(chunk);
@@ -214,6 +231,7 @@ public class ChatController {
                                     done.put("costMs", (int) (System.currentTimeMillis() - start));
                                     done.put("length", buffer.length());
                                     done.put("emotion", emotion);
+                                    done.put("citations", toCitations(hits));
                                     emitter.send(SseEmitter.event().name("done").data(done));
                                 } catch (IOException ignored) {
                                     // 客户端已断开，无需再推
@@ -245,6 +263,40 @@ public class ChatController {
         }
     }
 
+    /**
+     * 检索知识片段。失败一律返回空列表：
+     * 检索是增强手段，挂掉时应退化为普通对话，而不是让整个请求失败。
+     */
+    private List<KnowledgeHit> retrieve(String message) {
+        if (!knowledgeEnabled) {
+            return List.of();
+        }
+        try {
+            return knowledgeRetriever.retrieve(message);
+        } catch (Exception e) {
+            log.warn("knowledge retrieve failed, fallback to plain chat", e);
+            return List.of();
+        }
+    }
+
+    /** 交给模型的参考资料：带上标题，便于模型理解片段出处。 */
+    private static List<String> toReferences(List<KnowledgeHit> hits) {
+        return hits.stream().map(h -> h.getTitle() + "：" + h.getContent()).toList();
+    }
+
+    /** 返回给前端的引用标识：只给编号与标题，不把原文再传一次。 */
+    private static List<Map<String, Object>> toCitations(List<KnowledgeHit> hits) {
+        List<Map<String, Object>> citations = new ArrayList<>(hits.size());
+        for (int i = 0; i < hits.size(); i++) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("index", i + 1);
+            item.put("title", hits.get(i).getTitle());
+            item.put("docId", hits.get(i).getDocId());
+            citations.add(item);
+        }
+        return citations;
+    }
+
     /** 同步请求体。用户身份来自访问令牌，请求体不再携带 userId。 */
     public record ChatRequest(
             @NotBlank(message = "message 不能为空")
@@ -261,6 +313,6 @@ public class ChatController {
     }
 
     public record ChatReply(String reply, String model, boolean mock, int costMs,
-                            EmotionAssessment emotion) {
+                            EmotionAssessment emotion, List<Map<String, Object>> citations) {
     }
 }

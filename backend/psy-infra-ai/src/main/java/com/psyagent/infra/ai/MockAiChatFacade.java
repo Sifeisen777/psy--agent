@@ -25,17 +25,19 @@ public class MockAiChatFacade implements AiChatFacade {
     }
 
     @Override
-    public String chat(String userId, String message, List<Message> history) {
+    public String chat(String userId, String message, List<Message> history, List<String> references) {
         int historySize = history == null ? 0 : history.size();
+        int refCount = references == null ? 0 : references.size();
         return "【Mock 模式】未配置模型密钥，本次未调用真实模型。\n"
-                + "已携带历史消息 " + historySize + " 条，本轮输入：「" + message + "」\n"
+                + "已携带历史消息 " + historySize + " 条、参考资料 " + refCount + " 条，本轮输入：「" + message + "」\n"
                 + "配置 psy.ai.api-key 后可获得真实回复。";
     }
 
     @Override
-    public Flux<String> streamChat(String userId, String message, List<Message> history) {
+    public Flux<String> streamChat(String userId, String message, List<Message> history,
+                                   List<String> references) {
         // 逐字输出，便于前端在无密钥环境下验证流式渲染与断线处理
-        return Flux.fromArray(chat(userId, message, history).split(""))
+        return Flux.fromArray(chat(userId, message, history, references).split(""))
                 .delayElements(Duration.ofMillis(8));
     }
 

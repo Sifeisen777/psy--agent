@@ -1,6 +1,7 @@
 package com.psyagent.infra.ai;
 
 import org.springframework.ai.chat.messages.Message;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 
@@ -20,21 +21,36 @@ public interface AiChatFacade {
     String modelName();
 
     /**
+     * 同步对话（无参考资料）。
+     */
+    default String chat(String userId, String message, List<Message> history) {
+        return chat(userId, message, history, List.of());
+    }
+
+    /**
      * 同步对话。
      *
-     * @param userId  用户标识，用于日志与限流隔离
-     * @param message 本轮用户输入
-     * @param history 历史消息，按时间正序，不包含本轮输入；实现方负责追加本轮消息
+     * @param userId     用户标识，用于日志与限流隔离
+     * @param message    本轮用户输入
+     * @param history    历史消息，按时间正序，不包含本轮输入；实现方负责追加本轮消息
+     * @param references 检索到的知识片段，按相关度降序；为空表示本轮不启用检索增强
      * @return 模型回复
      */
-    String chat(String userId, String message, List<Message> history);
+    String chat(String userId, String message, List<Message> history, List<String> references);
+
+    /**
+     * 流式对话（无参考资料）。
+     */
+    default Flux<String> streamChat(String userId, String message, List<Message> history) {
+        return streamChat(userId, message, history, List.of());
+    }
 
     /**
      * 流式对话。每个元素为增量片段，由调用方拼接并推送，门面层不关心传输方式。
      *
-     * @param history 语义同 {@link #chat(String, String, List)}
+     * @param references 语义同 {@link #chat(String, String, List, List)}
      */
-    reactor.core.publisher.Flux<String> streamChat(String userId, String message, List<Message> history);
+    Flux<String> streamChat(String userId, String message, List<Message> history, List<String> references);
 
     /**
      * 真实探活：使用当前密钥发起一次最小请求，确认模型侧可用。

@@ -14,6 +14,7 @@
 | 会话管理 | 多会话隔离、历史消息持久化、标题自动生成 |
 | 对话记忆 | 按会话注入最近 N 条历史，多轮上下文连续 |
 | 情绪与风险评估 | 模型输出结构化结果（情绪 / 强度 / 风险等级），写入消息记录 |
+| 知识库检索 | 心理科普内容切片入库，回答前检索并在回复中标注引用来源 |
 | 模型接入 | OpenAI 兼容协议，可对接 DeepSeek、通义、智谱或本地 vLLM |
 | 无密钥降级 | 未配置模型密钥时以 Mock 模式运行，便于本地开发与 CI |
 | 限流 | 基于 Redis 的会话级限流，拒绝请求不消耗模型调用 |
@@ -141,10 +142,10 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 |---|---|---|
 | `meta` | `{conversationId, title}` | 首帧，返回会话标识 |
 | `delta` | 文本片段 | 增量内容，可多次 |
-| `done` | `{costMs, length, emotion}` | 生成结束，附带本轮情绪与风险评估 |
+| `done` | `{costMs, length, emotion, citations}` | 生成结束，附带评估结果与引用来源 |
 | `error` | 错误提示 | 生成失败 |
 
-`emotion` 为结构化评估结果，字段见下文「情绪与风险评估」。
+`emotion` 与 `citations` 的含义见下文「情绪与风险评估」「知识库与检索」。
 
 ### 会话
 
@@ -202,7 +203,43 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 | `t_user` | 账号，密码以 BCrypt 存储；注销时逻辑删除并将用户名改写为 `name#id`，释放唯一键 |
 | `t_conversation` | 会话，冗余维护消息条数与最后活跃时间，避免列表页聚合查询 |
 | `t_message` | 消息，只追加；`risk_level` 记录该条用户消息的风险等级 |
+| `t_knowledge_doc` | 知识库文档，保留原文用于溯源 |
+| `t_knowledge_chunk` | 知识切片，`content` 建有 ngram 全文索引用于检索 |
 | `flyway_schema_history` | 迁移记录，由 Flyway 维护 |
+
+## 知识库与检索
+
+启动时扫描 `classpath:knowledge/*.md`，按标题判重后切片入库（幂等，重复启动不产生副本）。
+
+### 切片策略
+
+按**空行分段**，段落累计超过 320 字再切；超长段落先按句号拆句再聚合。
+不按固定字数硬切的原因：一句完整论证被截断后，检索命中拼进提示词也是残缺语义。
+
+### 检索方式
+
+采用 MySQL ngram 全文索引（中文按 2 字切分）做稀疏检索，相关度由倒排表计算（类 TF-IDF）。
+与向量检索同属 RAG 的检索层，差别在相似度度量：
+
+| | 稀疏检索（当前） | 向量检索 |
+|---|---|---|
+| 依赖 | 字面重叠 | 语义距离 |
+| 基础设施 | 无额外组件 | 需 embedding 服务 + 向量库 |
+| 短板 | 同义表达匹配不上 | 召回更宽，但需调阈值与重排 |
+
+补偿手段：查询扩展（口语映射到书面语），领域词门槛，双阈值过滤。
+
+### 引用链路
+
+1. 检索命中片段注入系统提示词，带编号 `[1][2]`，并要求模型标注引用
+2. `done` 帧返回 `citations: [{index, title, docId}]`，前端按文档合并展示
+3. 用户消息原样落库，检索内容不写入对话历史
+
+### 已知局限
+
+- **语义鸿沟**：`睡不着` 与 `失眠` 靠词表桥接，`我晚上脑子停不下来` 这类表达检索不到，只能依赖模型常识
+- **虚词干扰**：中文无分词器，ngram 会让「今天天气怎么样」这类无关查询也拿到分数，目前靠领域词门槛拦截
+- 根治需要 embedding 服务（DeepSeek 未提供 embeddings 接口），接入后可在 `KnowledgeRetriever` 后追加向量召回并做融合排序
 
 ## 情绪与风险评估
 
@@ -245,6 +282,7 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 | `psy.ai.model` | 模型名称 | `deepseek-chat` |
 | `psy.ai.memory-max-messages` | 注入上下文的历史消息上限 | `20` |
 | `psy.ai.emotion-enabled` | 是否启用情绪与风险评估 | `true` |
+| `psy.knowledge.enabled` | 是否启用知识库检索 | `true` |
 | `psy.rate-limit.chat-per-minute` | 单用户每分钟对话次数上限 | `10` |
 | `psy.jwt.secret` | 令牌签名密钥（HS256，至少 32 字节），生产环境通过 `PSY_JWT_SECRET` 注入 | 开发默认值 |
 | `psy.jwt.expiration` | 令牌有效期 | `2h` |
@@ -269,7 +307,7 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 - [x] 多轮对话记忆
 - [x] 结构化情绪与风险输出
 - [x] 消息渲染：Markdown 与富文本安全处理
-- [ ] 知识库检索与引用溯源
+- [x] 知识库检索与引用溯源
 - [ ] 多智能体编排与工具调用
 - [ ] 可观测性与效果评测
 

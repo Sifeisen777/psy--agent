@@ -480,6 +480,36 @@ textarea {
   font-weight: 600;
 }
 
+/* 引用来源：与情绪标签区分开，弱化存在感但保证可读 */
+.citations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.citations-label {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #eeece8;
+  color: #6b6863;
+}
+
+.citation-item {
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: #f6f4f1;
+  border: 1px solid var(--line);
+}
+
+.citation-item em {
+  font-style: normal;
+  color: var(--brand);
+  margin-left: 2px;
+}
+
 .crisis {
   margin: 0 24px 8px;
   padding: 10px 14px;
