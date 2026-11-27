@@ -211,17 +211,12 @@ textarea {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  padding: 0 4px 14px;
+  padding: 0 4px 12px;
 }
 
 .brand strong {
   font-size: 16px;
   letter-spacing: 0.4px;
-}
-
-.brand .uid {
-  font-size: 11px;
-  color: var(--ink-soft);
 }
 
 .new-chat {
@@ -281,16 +276,60 @@ textarea {
   margin-top: 24px;
 }
 
+.account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfaf7;
+}
+
+.account-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.avatar {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: #3f6354;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.account-text {
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .logout {
-  background: transparent;
+  flex: 0 0 auto;
+  background: #fff;
+  border: 1px solid var(--line);
   color: var(--ink-soft);
   font-size: 12px;
-  padding: 8px;
-  margin-top: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
 }
 
 .logout:hover {
   color: var(--danger);
+  border-color: var(--danger);
 }
 
 .main {

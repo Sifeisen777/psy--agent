@@ -134,7 +134,14 @@ function formatTime(value) {
     <aside class="sidebar">
       <div class="brand">
         <strong>psy-agent</strong>
-        <span class="uid">{{ username }}</span>
+      </div>
+
+      <div class="account">
+        <span class="account-name" :title="username">
+          <span class="avatar">{{ (username || '?').slice(0, 1).toUpperCase() }}</span>
+          <span class="account-text">{{ username || '未登录' }}</span>
+        </span>
+        <button class="logout" @click="emit('logout')">退出</button>
       </div>
 
       <button class="new-chat" :disabled="streaming" @click="newConversation">+ 新建对话</button>
@@ -152,8 +159,6 @@ function formatTime(value) {
         </button>
         <p v-if="!conversations.length" class="empty">还没有对话，直接开始聊吧</p>
       </div>
-
-      <button class="logout" @click="emit('logout')">退出</button>
     </aside>
 
     <main class="main">
