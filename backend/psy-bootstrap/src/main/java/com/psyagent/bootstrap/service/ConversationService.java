@@ -95,6 +95,30 @@ public class ConversationService {
     }
 
     /**
+     * 回填最近一条用户消息的风险等级。
+     * <p>
+     * 写 user 消息而不是 assistant 消息：风险描述的是"用户此刻的状态"，
+     * 危机干预检索时按 `role='user' and risk_level in ('MEDIUM','HIGH')` 定位才有意义。
+     */
+    public void updateLastUserRiskLevel(Long conversationId, String riskLevel) {
+        if (riskLevel == null) {
+            return;
+        }
+        Message lastUserMessage = messageMapper.selectOne(Wrappers.<Message>lambdaQuery()
+                .eq(Message::getConversationId, conversationId)
+                .eq(Message::getRole, "user")
+                .orderByDesc(Message::getId)
+                .last("limit 1"));
+        if (lastUserMessage == null) {
+            return;
+        }
+        Message patch = new Message();
+        patch.setId(lastUserMessage.getId());
+        patch.setRiskLevel(riskLevel);
+        messageMapper.updateById(patch);
+    }
+
+    /**
      * 删除会话：仅对会话本身做逻辑删除，消息记录保留。
      * <p>
      * 消息不随之删除的原因：心理支持场景下"用户说过什么"属于审计数据，

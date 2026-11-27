@@ -13,6 +13,7 @@
 | 流式对话 | SSE 逐字返回，首字延迟约 1 秒 |
 | 会话管理 | 多会话隔离、历史消息持久化、标题自动生成 |
 | 对话记忆 | 按会话注入最近 N 条历史，多轮上下文连续 |
+| 情绪与风险评估 | 模型输出结构化结果（情绪 / 强度 / 风险等级），写入消息记录 |
 | 模型接入 | OpenAI 兼容协议，可对接 DeepSeek、通义、智谱或本地 vLLM |
 | 无密钥降级 | 未配置模型密钥时以 Mock 模式运行，便于本地开发与 CI |
 | 限流 | 基于 Redis 的会话级限流，拒绝请求不消耗模型调用 |
@@ -138,8 +139,10 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 |---|---|---|
 | `meta` | `{conversationId, title}` | 首帧，返回会话标识 |
 | `delta` | 文本片段 | 增量内容，可多次 |
-| `done` | `{costMs, length}` | 生成结束 |
+| `done` | `{costMs, length, emotion}` | 生成结束，附带本轮情绪与风险评估 |
 | `error` | 错误提示 | 生成失败 |
+
+`emotion` 为结构化评估结果，字段见下文「情绪与风险评估」。
 
 ### 会话
 
@@ -196,8 +199,40 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 |---|---|
 | `t_user` | 账号，密码以 BCrypt 存储；注销时逻辑删除并将用户名改写为 `name#id`，释放唯一键 |
 | `t_conversation` | 会话，冗余维护消息条数与最后活跃时间，避免列表页聚合查询 |
-| `t_message` | 消息，只追加；预留 `risk_level` 字段用于风险分级 |
+| `t_message` | 消息，只追加；`risk_level` 记录该条用户消息的风险等级 |
 | `flyway_schema_history` | 迁移记录，由 Flyway 维护 |
+
+## 情绪与风险评估
+
+每轮对话结束后，对用户输入做一次独立的结构化评估，结果通过 `done` 帧返回并回填到消息记录。
+
+```json
+{
+  "emotion": "焦虑",
+  "intensity": 65,
+  "riskLevel": "LOW",
+  "reason": "备考压力大、失眠、注意力不集中，但无自伤表述",
+  "suggestion": "睡前固定时间做10分钟深呼吸放松，白天用番茄钟分段学习。",
+  "source": "MODEL"
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `emotion` | 主要情绪，两个字概括 |
+| `intensity` | 强度 0–100 |
+| `riskLevel` | `NONE` / `LOW` / `MEDIUM` / `HIGH` |
+| `reason` | 判定依据，摘引用户原话 |
+| `suggestion` | 一句可执行建议 |
+| `source` | `MODEL` 模型判定 / `RULE` 规则兜底 / `MOCK` 降级模式 |
+
+设计约束：
+
+- **评估失败不影响对话**：模型调用异常时降级为关键词规则判定，返回 `source = RULE`，主回复不受影响。
+- **风险等级写入用户消息**：`risk_level` 描述的是用户状态，干预检索按
+  `role = 'user' AND risk_level IN ('MEDIUM','HIGH')` 定位。
+- **提示词与对话人设隔离**：评估要求零温度、限定输出长度，不复用聊天提示词，避免影响回复语气。
+- **跳过评估**：`psy.ai.emotion-enabled=false` 时不产生额外调用，`done` 帧不含 `emotion`。
 
 ## 配置项
 
@@ -207,6 +242,7 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 | `psy.ai.base-url` | OpenAI 兼容端点 | `https://api.deepseek.com` |
 | `psy.ai.model` | 模型名称 | `deepseek-chat` |
 | `psy.ai.memory-max-messages` | 注入上下文的历史消息上限 | `20` |
+| `psy.ai.emotion-enabled` | 是否启用情绪与风险评估 | `true` |
 | `psy.rate-limit.chat-per-minute` | 单用户每分钟对话次数上限 | `10` |
 | `psy.jwt.secret` | 令牌签名密钥（HS256，至少 32 字节），生产环境通过 `PSY_JWT_SECRET` 注入 | 开发默认值 |
 | `psy.jwt.expiration` | 令牌有效期 | `2h` |
@@ -229,7 +265,8 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 - [x] 流式对话、会话管理、Web 客户端
 - [x] 身份认证与访问控制（JWT）
 - [x] 多轮对话记忆
-- [ ] 结构化情绪与风险输出
+- [x] 结构化情绪与风险输出
+- [ ] 消息渲染：Markdown 与富文本安全处理
 - [ ] 知识库检索与引用溯源
 - [ ] 多智能体编排与工具调用
 - [ ] 可观测性与效果评测

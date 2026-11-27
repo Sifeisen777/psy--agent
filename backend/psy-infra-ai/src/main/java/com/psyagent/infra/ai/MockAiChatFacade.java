@@ -43,4 +43,10 @@ public class MockAiChatFacade implements AiChatFacade {
     public ProbeResult probe() {
         return ProbeResult.mock();
     }
+
+    /** 降级模式下走规则判定，保证无密钥环境也能验证风险评估链路。 */
+    @Override
+    public EmotionAssessment assess(String userId, String userMessage) {
+        return RuleBasedEmotionJudge.judge(userMessage).withSource("MOCK");
+    }
 }

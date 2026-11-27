@@ -63,6 +63,9 @@ psy:
     timeout-seconds: 30
     # 注入上下文的历史消息条数上限，超出后仅保留最近部分
     memory-max-messages: ${AI_MEMORY_MAX_MESSAGES:20}
+    # 情绪与风险评估：每轮对话额外一次短调用（约 300–800ms，300 token 以内）
+    # 关闭后不再评估风险，done 帧不含 emotion，risk_level 保持为空
+    emotion-enabled: ${AI_EMOTION_ENABLED:true}
   # 对话接口限流：单人每分钟最多 10 次，防刷、防误触、也防模型账单失控
   rate-limit:
     chat-per-minute: ${CHAT_RATE_LIMIT:10}

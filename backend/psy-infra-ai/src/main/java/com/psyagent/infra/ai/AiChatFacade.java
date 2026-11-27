@@ -41,4 +41,16 @@ public interface AiChatFacade {
      * 实现方需自带缓存（默认 60 秒），避免健康检查产生额外费用与延迟。
      */
     ProbeResult probe();
+
+    /**
+     * 情绪与风险评估，返回可直接入库的结构化结果。
+     * <p>
+     * 契约要点：**本方法不抛异常**。评估属于旁路能力，失败时应降级为规则判定并继续，
+     * 不能让"判断情绪"这件事把已经生成好的回复链路拖垮。
+     *
+     * @param userId      用户标识，仅用于日志
+     * @param userMessage 本轮用户输入
+     * @return 归一化后的评估结果，永不为 null
+     */
+    EmotionAssessment assess(String userId, String userMessage);
 }

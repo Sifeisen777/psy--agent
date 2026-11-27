@@ -8,6 +8,7 @@ import com.psyagent.common.api.R;
 import com.psyagent.common.api.ResultCode;
 import com.psyagent.common.exception.BizException;
 import com.psyagent.infra.ai.AiChatFacade;
+import com.psyagent.infra.ai.EmotionAssessment;
 import com.psyagent.store.entity.Conversation;
 import com.psyagent.store.ratelimit.RedisRateLimiter;
 import jakarta.validation.Valid;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
+import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -54,19 +56,22 @@ public class ChatController {
     private final ConversationMemoryService memoryService;
     private final AuthService authService;
     private final int chatLimit;
+    private final boolean emotionEnabled;
 
     public ChatController(AiChatFacade aiChatFacade,
                           RedisRateLimiter rateLimiter,
                           ConversationService conversationService,
                           ConversationMemoryService memoryService,
                           AuthService authService,
-                          @Value("${psy.rate-limit.chat-per-minute:10}") int chatLimit) {
+                          @Value("${psy.rate-limit.chat-per-minute:10}") int chatLimit,
+                          @Value("${psy.ai.emotion-enabled:true}") boolean emotionEnabled) {
         this.aiChatFacade = aiChatFacade;
         this.rateLimiter = rateLimiter;
         this.conversationService = conversationService;
         this.memoryService = memoryService;
         this.authService = authService;
         this.chatLimit = chatLimit;
+        this.emotionEnabled = emotionEnabled;
     }
 
     /** 同步通道：只回内容，不落库。 */
@@ -87,7 +92,10 @@ public class ChatController {
             throw BizException.of(ResultCode.AI_UNAVAILABLE);
         }
         int cost = (int) (System.currentTimeMillis() - startedAt);
-        return R.ok(new ChatReply(reply, aiChatFacade.modelName(), !aiChatFacade.available(), cost));
+        EmotionAssessment emotion = emotionEnabled
+                ? aiChatFacade.assess(String.valueOf(userId), request.message())
+                : null;
+        return R.ok(new ChatReply(reply, aiChatFacade.modelName(), !aiChatFacade.available(), cost, emotion));
     }
 
     /**
@@ -97,7 +105,7 @@ public class ChatController {
      * <pre>
      * event: meta   data: {"conversationId":123,"title":"..."}   首帧，前端拿到会话 id
      * event: delta  data: 文本片段                                多次
-     * event: done   data: {"costMs":2010,"length":180}            结束
+     * event: done   data: {"costMs":2010,"length":180,"emotion":{...}}  结束，附带情绪评估
      * event: error  data: 错误提示                                异常时
      * </pre>
      * 为什么用 SseEmitter 而不是直接返回 Flux：当前是 Servlet 栈（Tomcat），
@@ -183,20 +191,36 @@ public class ChatController {
                             }
                             emitter.complete();
                         },
-                        () -> {
+                        () -> Schedulers.boundedElastic().schedule(() -> {
                             saveOnce.run();
+                            // 评估是一次独立的模型调用，放在弹性线程池执行：
+                            // 回调本身跑在响应式线程上，直接阻塞会拖慢同一线程上的其他请求
+                            EmotionAssessment emotion = emotionEnabled
+                                    ? aiChatFacade.assess(String.valueOf(userId), request.message())
+                                    : null;
+                            try {
+                                if (emotion != null) {
+                                    conversationService.updateLastUserRiskLevel(
+                                            conversation.getId(), emotion.riskLevel());
+                                }
+                            } catch (Exception e) {
+                                // 回填失败不影响主流程，风险等级可由日志与重放补齐
+                                log.error("risk level update failed conversationId={}",
+                                        conversation.getId(), e);
+                            }
                             if (!clientGone.get()) {
                                 try {
                                     Map<String, Object> done = new LinkedHashMap<>();
                                     done.put("costMs", (int) (System.currentTimeMillis() - start));
                                     done.put("length", buffer.length());
+                                    done.put("emotion", emotion);
                                     emitter.send(SseEmitter.event().name("done").data(done));
                                 } catch (IOException ignored) {
                                     // 客户端已断开，无需再推
                                 }
                             }
                             emitter.complete();
-                        });
+                        }));
 
         emitter.onCompletion(() -> {
             saveOnce.run();
@@ -236,6 +260,7 @@ public class ChatController {
     ) {
     }
 
-    public record ChatReply(String reply, String model, boolean mock, int costMs) {
+    public record ChatReply(String reply, String model, boolean mock, int costMs,
+                            EmotionAssessment emotion) {
     }
 }

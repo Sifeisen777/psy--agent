@@ -14,6 +14,7 @@ const input = ref('')
 const streaming = ref(false)
 const error = ref('')
 const lastCost = ref(null)
+const crisisAlert = ref(false)
 const listEl = ref(null)
 const controller = ref(null)
 
@@ -32,8 +33,12 @@ async function openConversation(item) {
   currentId.value = item.id
   error.value = ''
   lastCost.value = null
+  crisisAlert.value = false
   try {
     messages.value = await get(`/conversation/${item.id}/messages`)
+    // 历史消息只带 risk_level，若最近一条用户消息为高风险，仍需给出求助入口
+    const lastUser = [...messages.value].reverse().find((m) => m.role === 'user')
+    crisisAlert.value = lastUser?.riskLevel === 'HIGH'
     scrollToBottom(true)
   } catch (e) {
     error.value = e.message
@@ -47,6 +52,7 @@ function newConversation() {
   input.value = ''
   error.value = ''
   lastCost.value = null
+  crisisAlert.value = false
 }
 
 /**
@@ -89,7 +95,8 @@ async function send() {
   const text = input.value.trim()
   if (!text || streaming.value) return
 
-  messages.value.push({ role: 'user', content: text })
+  const userMsg = { role: 'user', content: text }
+  messages.value.push(userMsg)
   // 先把 assistant 气泡占位推进去，后续 delta 直接往里追加，视觉上就是"打字机"
   const reply = { role: 'assistant', content: '', pending: true }
   messages.value.push(reply)
@@ -118,6 +125,12 @@ async function send() {
       },
       onDone: (info) => {
         lastCost.value = info
+        if (info.emotion) {
+          // 评估结果描述的是用户此刻的状态，挂到用户这条消息上
+          userMsg.emotion = info.emotion
+          userMsg.riskLevel = info.emotion.riskLevel
+          crisisAlert.value = info.emotion.riskLevel === 'HIGH'
+        }
         reply.pending = false
       }
     })
@@ -163,6 +176,21 @@ function formatTime(value) {
   if (!value) return ''
   return String(value).replace('T', ' ').slice(5, 16)
 }
+
+const RISK_TEXT = {
+  NONE: '平稳',
+  LOW: '低风险',
+  MEDIUM: '需关注',
+  HIGH: '高风险'
+}
+
+function riskText(level) {
+  return RISK_TEXT[level] || RISK_TEXT.LOW
+}
+
+function riskClass(level) {
+  return 'risk-' + String(level || 'LOW').toLowerCase()
+}
 </script>
 
 <template>
@@ -174,7 +202,7 @@ function formatTime(value) {
 
       <div class="account">
         <span class="account-name" :title="username">
-          <span class="avatar">{{ (username || '?').slice(0, 1).toUpperCase() }}</span>
+          <span class="avatar-mini">{{ (username || '?').slice(0, 1).toUpperCase() }}</span>
           <span class="account-text">{{ username || '未登录' }}</span>
         </span>
         <button class="logout" @click="emit('logout')">退出</button>
@@ -214,6 +242,11 @@ function formatTime(value) {
         <span v-if="lastCost" class="cost">耗时 {{ lastCost.costMs }}ms · {{ lastCost.length }} 字</span>
       </header>
 
+      <div v-if="crisisAlert" class="crisis">
+        如果你正在经历危险，请让身边的人陪着你，并拨打全国心理援助热线
+        <strong>12356</strong>（24 小时）；紧急情况请拨打 <strong>120</strong>。
+      </div>
+
       <div ref="listEl" class="messages">
         <p v-if="!messages.length" class="welcome">
           这里是一个可以慢慢说的地方。<br />
@@ -222,9 +255,21 @@ function formatTime(value) {
 
         <div v-for="(msg, index) in messages" :key="index" class="msg" :class="msg.role">
           <div class="avatar">{{ msg.role === 'user' ? '我' : 'AI' }}</div>
-          <div class="bubble">
-            <span v-if="msg.content">{{ msg.content }}</span>
-            <span v-else-if="msg.pending" class="typing"><i></i><i></i><i></i></span>
+          <div class="bubble-wrap">
+            <div class="bubble">
+              <span v-if="msg.content">{{ msg.content }}</span>
+              <span v-else-if="msg.pending" class="typing"><i></i><i></i><i></i></span>
+            </div>
+            <div
+              v-if="msg.emotion || msg.riskLevel"
+              class="emotion-tag"
+              :class="riskClass(msg.emotion?.riskLevel || msg.riskLevel)"
+            >
+              <template v-if="msg.emotion">
+                {{ msg.emotion.emotion }} · 强度 {{ msg.emotion.intensity }} · {{ riskText(msg.emotion.riskLevel) }}
+              </template>
+              <template v-else>{{ riskText(msg.riskLevel) }}</template>
+            </div>
           </div>
         </div>
       </div>
