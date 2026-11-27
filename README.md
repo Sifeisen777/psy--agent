@@ -12,6 +12,7 @@
 |---|---|
 | 流式对话 | SSE 逐字返回，首字延迟约 1 秒 |
 | 会话管理 | 多会话隔离、历史消息持久化、标题自动生成 |
+| 对话记忆 | 按会话注入最近 N 条历史，多轮上下文连续 |
 | 模型接入 | OpenAI 兼容协议，可对接 DeepSeek、通义、智谱或本地 vLLM |
 | 无密钥降级 | 未配置模型密钥时以 Mock 模式运行，便于本地开发与 CI |
 | 限流 | 基于 Redis 的会话级限流，拒绝请求不消耗模型调用 |
@@ -59,6 +60,8 @@ psy-bootstrap → psy-infra-ai  → psy-common
 - **主键精度**：采用雪花 ID，接口层统一序列化为字符串，规避前端 `Number` 精度丢失。
 - **消息只追加**：`t_message` 不做逻辑删除，保留完整审计链路；用户与会话采用逻辑删除。
 - **限流前置**：限流判断先于模型调用，超额请求直接返回，不产生费用与延迟。
+- **记忆以数据库为准**：上下文按会话从消息表读取，而非进程内缓存，重启与多实例部署下上下文保持连续；
+  窗口大小可配置，超出后仅保留最近若干条。
 
 ## 目录结构
 
@@ -202,6 +205,7 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 | `psy.ai.api-key` | 模型密钥，为空时启用 Mock | 空 |
 | `psy.ai.base-url` | OpenAI 兼容端点 | `https://api.deepseek.com` |
 | `psy.ai.model` | 模型名称 | `deepseek-chat` |
+| `psy.ai.memory-max-messages` | 注入上下文的历史消息上限 | `20` |
 | `psy.rate-limit.chat-per-minute` | 单用户每分钟对话次数上限 | `10` |
 | `psy.jwt.secret` | 令牌签名密钥（HS256，至少 32 字节），生产环境通过 `PSY_JWT_SECRET` 注入 | 开发默认值 |
 | `psy.jwt.expiration` | 令牌有效期 | `2h` |
@@ -223,7 +227,8 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 - [x] 数据持久化、版本化迁移、会话级限流
 - [x] 流式对话、会话管理、Web 客户端
 - [x] 身份认证与访问控制（JWT）
-- [ ] 对话记忆与结构化情绪评估
+- [x] 多轮对话记忆
+- [ ] 结构化情绪与风险输出
 - [ ] 知识库检索与引用溯源
 - [ ] 多智能体编排与工具调用
 - [ ] 可观测性与效果评测
