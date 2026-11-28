@@ -466,22 +466,25 @@ curl -s http://localhost:8080/mcp \
 ### 评测与压测
 
 ```bash
+cd backend && mvn test          # 单元测试，57 项，不依赖数据库与模型
 python eval/api_test.py  --base-url http://localhost:8080
 python eval/run_eval.py   --base-url http://localhost:8080
 python eval/load_test.py  --base-url http://localhost:8080 --users 20 --per-user 3 --concurrency 10
 ```
 
-两个脚本验的东西不同，都要跑：
+三层测试覆盖不同问题，彼此不可替代：
 
-- `eval/api_test.py`：**接口契约与边界**——鉴权、参数校验、会话归属、错误码、幂等、限流、
+- **单元测试（`mvn test`）**：规则分诊、引用越界校验、工单状态机、风险回溯。
+  毫秒级、零外部依赖，改规则时立刻知道哪条边界被碰坏；`mvn package` 会一并执行。
+- **接口测试 `eval/api_test.py`**：**接口契约与边界**——鉴权、参数校验、会话归属、错误码、幂等、限流、
   traceId 重试可观测性、复核工单状态机、会话级风险回溯，共 67 项断言，不依赖模型措辞。
-- `eval/cases.json` + `eval/run_eval.py`：**产品行为**——13 条对话用例 + 4 项 MCP 协议检查，
+- **产品评测 `eval/cases.json` + `eval/run_eval.py`**：13 条对话用例 + 4 项 MCP 协议检查，
   断言只检查结构化契约（route / steps / tools / citations / hitl / traceId / ttftMs），换模型后结论稳定。
-- `eval/load_test.py`：并发压测完整链路（鉴权 → 编排 → 检索/工具 → 模型 → 落库 → 观测写入），
+- **压测 `eval/load_test.py`**：并发跑完整链路（鉴权 → 编排 → 检索/工具 → 模型 → 落库 → 观测写入），
   输出吞吐与延迟分位数到 `eval/reports/load-report.md`。
 
 本机实测（JDK 17 / MySQL 8 / Redis 8，真实模型接入）：
-接口 **67/67**、评测 **17/17**、压测 **60/60**，吞吐 **6.02 req/s**，
+单元测试 **57/57**、接口 **67/67**、评测 **17/17**、压测 **60/60**，吞吐 **6.02 req/s**，
 首字延迟 p50 **303ms**、p95 **522ms**。原始报告见 `eval/reports/`。
 
 首字延迟比上一版下降，是因为情绪路径不再检索：少一次查询，也少一段会误导模型的参考资料。

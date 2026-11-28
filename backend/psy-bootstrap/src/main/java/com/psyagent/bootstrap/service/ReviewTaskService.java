@@ -117,13 +117,7 @@ public class ReviewTaskService {
     /** 认领：只有 PENDING 能被认领，避免两个值班人同时跟进同一个用户。 */
     public ReviewTask claim(Long id, String handler) {
         require(id);
-        int rows = mapper.update(null, Wrappers.<ReviewTask>lambdaUpdate()
-                .eq(ReviewTask::getId, id)
-                .eq(ReviewTask::getStatus, PENDING)
-                .set(ReviewTask::getStatus, CLAIMED)
-                .set(ReviewTask::getHandler, handler)
-                .set(ReviewTask::getClaimedAt, LocalDateTime.now()));
-        if (rows == 0) {
+        if (mapper.claim(id, handler) == 0) {
             throw BizException.of(ResultCode.BAD_REQUEST, "工单已被认领或已关闭");
         }
         return mapper.selectById(id);
@@ -140,13 +134,7 @@ public class ReviewTaskService {
                     "结论只能是 " + CLOSED + " 或 " + FALSE_POSITIVE);
         }
         require(id);
-        int rows = mapper.update(null, Wrappers.<ReviewTask>lambdaUpdate()
-                .eq(ReviewTask::getId, id)
-                .eq(ReviewTask::getStatus, CLAIMED)
-                .set(ReviewTask::getStatus, status)
-                .set(ReviewTask::getConclusion, conclusion)
-                .set(ReviewTask::getClosedAt, LocalDateTime.now()));
-        if (rows == 0) {
+        if (mapper.close(id, status, conclusion) == 0) {
             throw BizException.of(ResultCode.BAD_REQUEST, "只能关闭已认领的工单，请先认领");
         }
         return mapper.selectById(id);
