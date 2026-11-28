@@ -3,11 +3,13 @@ package com.psyagent.bootstrap.controller;
 import com.psyagent.bootstrap.agent.AgentContext;
 import com.psyagent.bootstrap.agent.AgentOrchestrator;
 import com.psyagent.bootstrap.observability.ChatTraceRecorder;
+import com.psyagent.bootstrap.observability.CitationAuditor;
 import com.psyagent.bootstrap.observability.TraceContext;
 import com.psyagent.bootstrap.security.CurrentUser;
 import com.psyagent.bootstrap.service.AuthService;
 import com.psyagent.bootstrap.service.ConversationMemoryService;
 import com.psyagent.bootstrap.service.ConversationService;
+import com.psyagent.bootstrap.service.ReviewTaskService;
 import com.psyagent.common.api.R;
 import com.psyagent.common.api.ResultCode;
 import com.psyagent.common.exception.BizException;
@@ -63,6 +65,7 @@ public class ChatController {
     private final ConversationMemoryService memoryService;
     private final AgentOrchestrator orchestrator;
     private final ChatTraceRecorder traceRecorder;
+    private final ReviewTaskService reviewTaskService;
     private final AuthService authService;
     private final int chatLimit;
     private final boolean emotionEnabled;
@@ -73,6 +76,7 @@ public class ChatController {
                           ConversationMemoryService memoryService,
                           AgentOrchestrator orchestrator,
                           ChatTraceRecorder traceRecorder,
+                          ReviewTaskService reviewTaskService,
                           AuthService authService,
                           @Value("${psy.rate-limit.chat-per-minute:10}") int chatLimit,
                           @Value("${psy.ai.emotion-enabled:true}") boolean emotionEnabled) {
@@ -82,6 +86,7 @@ public class ChatController {
         this.memoryService = memoryService;
         this.orchestrator = orchestrator;
         this.traceRecorder = traceRecorder;
+        this.reviewTaskService = reviewTaskService;
         this.authService = authService;
         this.chatLimit = chatLimit;
         this.emotionEnabled = emotionEnabled;
@@ -98,6 +103,9 @@ public class ChatController {
         AgentContext context = new AgentContext(userId, null, request.message(),
                 List.of(), TraceContext.current());
         orchestrator.run(context);
+        if (context.isHitlRequired()) {
+            reviewTaskService.createForCrisis(context);
+        }
 
         String reply;
         try {
@@ -115,13 +123,18 @@ public class ChatController {
         EmotionAssessment emotion = emotionEnabled
                 ? aiChatFacade.assess(String.valueOf(userId), request.message())
                 : null;
+        // 规则漏判的补充：路由没命中但模型判为高风险，同样要进复核队列
+        if (emotion != null && EmotionAssessment.RISK_HIGH.equals(emotion.riskLevel())) {
+            reviewTaskService.createForModelHigh(context);
+        }
         traceRecorder.record(context, aiChatFacade.modelName(), !aiChatFacade.available(),
                 modelCost, null, emotion == null ? null : emotion.riskLevel(),
                 reply.length(), false);
+        int citationIssues = CitationAuditor.outOfRange(reply, context.citations().size());
         return R.ok(new ChatReply(reply, aiChatFacade.modelName(), !aiChatFacade.available(), modelCost,
                 emotion, context.citations(), context.getRoute().name(),
                 context.getTrace(), context.isHitlRequired(),
-                context.getTraceId(), context.toolViews()));
+                context.getTraceId(), context.toolViews(), citationIssues));
     }
 
     /**
@@ -159,6 +172,10 @@ public class ChatController {
         AgentContext context = new AgentContext(userId, conversation.getId(),
                 request.message(), history, TraceContext.current());
         orchestrator.run(context);
+        // 建单放在生成之前：危机场景的跟进不该等模型写完才开始
+        if (context.isHitlRequired()) {
+            reviewTaskService.createForCrisis(context);
+        }
 
         // 用户消息在调用模型前落库，确保模型异常时仍保留用户输入记录
         conversationService.appendMessage(conversation.getId(), userId,
@@ -254,6 +271,9 @@ public class ChatController {
                                     : null;
                             if (emotion != null) {
                                 riskLevel.set(emotion.riskLevel());
+                                if (EmotionAssessment.RISK_HIGH.equals(emotion.riskLevel())) {
+                                    reviewTaskService.createForModelHigh(context);
+                                }
                                 try {
                                     conversationService.updateLastUserRiskLevel(
                                             conversation.getId(), emotion.riskLevel());
@@ -275,8 +295,13 @@ public class ChatController {
                                     done.put("hitl", context.isHitlRequired());
                                     done.put("traceId", context.getTraceId());
                                     done.put("tools", context.toolViews());
+                                    // 近 24 小时高风险条数：前端可据此决定是否保留关注提示
+                                    done.put("priorHighRisk", context.getPriorHighRiskCount());
                                     int firstToken = ttftMs.get();
                                     done.put("ttftMs", firstToken < 0 ? null : firstToken);
+                                    // 引用越界只记录不阻断：流式内容已发出，撤回不存在
+                                    done.put("citationIssues", CitationAuditor.outOfRange(
+                                            buffer.toString(), context.citations().size()));
                                     emitter.send(SseEmitter.event().name("done").data(done));
                                 } catch (IOException ignored) {
                                     // 客户端已断开，无需再推
@@ -330,6 +355,6 @@ public class ChatController {
     public record ChatReply(String reply, String model, boolean mock, int costMs,
                             EmotionAssessment emotion, List<Map<String, Object>> citations,
                             String route, List<AgentContext.AgentStep> steps, boolean hitl,
-                            String traceId, List<Map<String, Object>> tools) {
+                            String traceId, List<Map<String, Object>> tools, int citationIssues) {
     }
 }

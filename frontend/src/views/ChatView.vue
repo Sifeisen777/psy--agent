@@ -7,7 +7,7 @@ import { del, get, streamChat } from '../api/client'
 defineProps({
   username: { type: String, default: '' }
 })
-const emit = defineEmits(['logout', 'open-metrics'])
+const emit = defineEmits(['logout', 'open-metrics', 'open-review'])
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -255,6 +255,7 @@ function routeText(route) {
       <div class="brand">
         <strong>psy-agent</strong>
         <button class="side-link" @click="emit('open-metrics')">观测看板 →</button>
+        <button class="side-link" @click="emit('open-review')">复核队列 →</button>
       </div>
 
       <div class="account">

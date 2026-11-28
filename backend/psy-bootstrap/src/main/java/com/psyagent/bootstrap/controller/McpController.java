@@ -58,9 +58,16 @@ public class McpController {
         this.accessToken = accessToken;
     }
 
+    /**
+     * 请求体收 String 而不是 JsonNode，是为了自己解析。
+     * <p>
+     * 交给 Spring 反序列化的话，报文不合法会抛 {@code HttpMessageNotReadableException}，
+     * 异常处理器只能给出 HTTP 层面的错误，JSON-RPC 客户端拿到的是 500 而不是约定的
+     * {@code -32700 parse error}。协议实现的错误必须符合协议，不能返回框架的默认行为。
+     */
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> handle(@RequestBody JsonNode body,
+    public ResponseEntity<?> handle(@RequestBody(required = false) String raw,
                                     @RequestHeader(value = "X-MCP-Token", required = false) String tokenHeader,
                                     @RequestHeader(value = "Authorization", required = false) String authorization) {
         if (!authorized(tokenHeader, authorization)) {
@@ -68,6 +75,21 @@ public class McpController {
             return ResponseEntity.status(401)
                     .header("MCP-Protocol-Version", PROTOCOL_VERSION)
                     .body(error(null, -32001, "invalid MCP access token"));
+        }
+
+        JsonNode body;
+        try {
+            body = raw == null || raw.isBlank() ? null : objectMapper.readTree(raw);
+        } catch (Exception e) {
+            log.warn("mcp parse error: {}", e.getMessage());
+            return ResponseEntity.ok()
+                    .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                    .body(error(null, -32700, "parse error"));
+        }
+        if (body == null) {
+            return ResponseEntity.ok()
+                    .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                    .body(error(null, -32600, "invalid request: empty body"));
         }
 
         // 批量请求：逐个处理，通知类不产生响应（JSON-RPC 规定）

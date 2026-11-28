@@ -94,6 +94,12 @@ psy:
       from: ${ALERT_MAIL_FROM:psy-agent@localhost}
       host: ${ALERT_MAIL_HOST:localhost}
       port: ${ALERT_MAIL_PORT:25}
+  # 人工复核队列：只有白名单内的用户名能访问，默认拒绝（安全性配置不能默认放通）
+  review:
+    admin-usernames: ${PSY_REVIEW_ADMINS:leo_test}
+  # 风险回溯：本轮分诊不看历史，但"近期是否说过高风险的话"要参与语气约束
+  risk:
+    lookback-hours: ${RISK_LOOKBACK_HOURS:24}
 
 management:
   endpoints:

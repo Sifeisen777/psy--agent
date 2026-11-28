@@ -38,6 +38,9 @@ public class AgentContext {
     /** 是否需要人工复核，由 CrisisNode 写入。 */
     private boolean hitlRequired;
 
+    /** 近 24 小时高风险消息数，由 RiskHistoryNode 写入；-1 表示未查询。 */
+    private int priorHighRiskCount = -1;
+
     /** 拼装好的系统提示，由编排器在全部节点执行后写入。 */
     private String systemPrompt;
 
@@ -92,6 +95,14 @@ public class AgentContext {
 
     public void setHitlRequired(boolean hitlRequired) {
         this.hitlRequired = hitlRequired;
+    }
+
+    public int getPriorHighRiskCount() {
+        return priorHighRiskCount;
+    }
+
+    public void setPriorHighRiskCount(int priorHighRiskCount) {
+        this.priorHighRiskCount = priorHighRiskCount;
     }
 
     public String getSystemPrompt() {

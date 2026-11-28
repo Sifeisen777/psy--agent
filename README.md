@@ -19,6 +19,8 @@
 | 工具服务 | 量表计分、咨询预约、运行统计、危机告警；统一注册表 + 调用审计 |
 | MCP 接入 | Streamable HTTP 端点暴露 `tools/list` / `tools/call`，供外部模型客户端调用同一批工具 |
 | 可观测 | traceId 贯穿日志与 SSE，单轮轨迹落库，看板展示路由分布、延迟分位与趋势 |
+| 人工复核 | 危机场景自动建单，含 15 分钟响应时限、认领 / 闭环状态机与逾期统计 |
+| 输出校验 | 引用编号越界检测：模型编造 `[4]` 时记录告警，不改写已推送的正文 |
 | 评测与压测 | 结构化断言评测集、并发压测脚本与可复现报告 |
 | 模型接入 | OpenAI 兼容协议，可对接 DeepSeek、通义、智谱或本地 vLLM |
 | 无密钥降级 | 未配置模型密钥时以 Mock 模式运行，便于本地开发与 CI |
@@ -153,11 +155,16 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 |---|---|---|
 | `meta` | `{conversationId, title, traceId}` | 首帧，返回会话标识与链路 ID |
 | `delta` | 文本片段 | 增量内容，可多次 |
-| `done` | `{costMs, length, emotion, citations, route, steps, hitl, traceId, tools, ttftMs}` | 生成结束，附带编排轨迹与观测指标 |
+| `done` | `{costMs, length, emotion, citations, route, steps, hitl, traceId, tools, ttftMs, citationIssues, priorHighRisk}` | 生成结束，附带编排轨迹与观测指标 |
 | `error` | 错误提示 | 生成失败 |
 
 `emotion` / `citations` / `route` / `steps` 的含义见下文「对话编排」与「知识库与检索」；
-`tools` 为本轮工具调用摘要，`ttftMs` 为首字延迟，`traceId` 同时出现在响应头 `X-Trace-Id`。
+`tools` 为本轮工具调用摘要，`ttftMs` 为首字延迟，`traceId` 同时出现在响应头 `X-Trace-Id`；
+`citationIssues` 是回答中越界引用（如只有 3 条资料却出现 `[4]`）的个数；
+`priorHighRisk` 是本会话近 24 小时的高风险消息数，`-1` 表示本轮未查询（如无会话的同步通道）。
+
+生成开始前就失败（会话不存在、超出限流、参数不合法）时不会返回 SSE，而是返回 JSON：
+HTTP 200 + `code`（如 `40400` / `42900` / `40000`），前端按 `content-type` 区分。
 
 ### 会话
 
@@ -204,6 +211,22 @@ Windows 环境下可直接运行 `启动前端.cmd` / `关闭前端.cmd`。
 | GET | `/api/metrics/overview?hours=24` | 路由分布、首字延迟分位、工具调用统计与逐小时趋势 |
 | GET | `/api/metrics/traces?limit=20` | 最近若干轮轨迹明细（不含对话正文） |
 
+### 复核
+
+待办里是**别人的**倾诉片段，因此整组接口只对白名单账号开放（`psy.review.admin-usernames`），
+非白名单返回 `40300`。当前项目只有"登录 / 未登录"一层身份，白名单是最小可行的隔离；
+生产环境应把角色落库并写进令牌。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/review/tasks?status=PENDING&limit=20` | 待办列表，按首次响应时限升序 |
+| GET | `/api/review/summary?hours=24` | 各状态数量、逾期数、平均首次响应耗时 |
+| POST | `/api/review/tasks/{id}/claim` | 认领，记录处理人与认领时间 |
+| POST | `/api/review/tasks/{id}/close` | 闭环，`status` 取 `CLOSED` 或 `FALSE_POSITIVE` |
+
+状态流转：`PENDING` →（认领）→ `CLAIMED` →（关闭）→ `CLOSED` / `FALSE_POSITIVE`。
+认领与关闭都用 `WHERE status = ?` 做 CAS，两个人同时操作只有一个会成功。
+
 除 `/mcp` 与下方白名单外，响应统一为 `{ code, message, data, ts }`，`code = 0` 表示成功。
 
 ### 认证
@@ -244,7 +267,8 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 | `t_scale_record` | 量表计分记录，只存分值序列与分级 |
 | `t_appointment` | 咨询预约，唯一幂等键避免重复提交 |
 | `t_tool_call` | 工具调用审计，编排 / MCP / REST 三个入口统一落库，参数脱敏 |
-| `t_chat_trace` | 单轮对话轨迹，看板数据源，`trace_id` 唯一；不存对话正文 |
+| `t_chat_trace` | 单轮对话轨迹，看板数据源；`trace_id` 只建普通索引（同一链路可有多轮重试），不存对话正文 |
+| `t_review_task` | 人工复核工单，一单一 `trace_id`；记录来源、时限、处理人与结论 |
 | `flyway_schema_history` | 迁移记录，由 Flyway 维护 |
 
 ## 对话编排
@@ -252,9 +276,9 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 每轮对话先分诊，再按路由执行不同节点，最后把各节点产出汇总成系统提示交给模型。
 
 ```
-请求 → 分诊 ─┬─→ 知识检索 ─┐
-             ├─→ 危机干预 ─┼─→ 工具编排 ─→ 拼装系统提示 ─→ 模型生成
-             └─（寒暄跳过）┘
+请求 → 分诊 → 风险回溯 ─┬─→ 知识检索 ─┐
+                        ├─→ 危机干预 ─┼─→ 工具编排 ─→ 拼装系统提示 ─→ 模型生成
+                        └─（寒暄跳过）┘
 ```
 
 ### 路由与策略
@@ -270,6 +294,12 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 分类若走模型要再加 300ms 且直接叠在首字延迟上；规则命中哪条可追溯；
 风险判定不能依赖概率——规则命中即拦截，比模型"综合判断"更可靠。
 
+分诊只看当前这句话，但**风险不随一句"我好点了"被清空**。
+`风险回溯` 节点查会话内近 24 小时是否出现过高风险消息，命中时做两件事：
+把寒暄抬到情绪支持（四个字的短句按规则会判成 SMALLTALK，走"轻松回应"策略，
+而这正是最不该出现的反应）；注入语气约束，提醒不要当作已经没事。
+它刻意不把整段历史拼进规则判断——那会造成上下文污染，也让分诊结果无法追溯。
+
 ### 节点与执行轨迹
 
 节点实现 `AgentNode` 接口，自行声明本轮是否参与，顺序由 `@Order` 决定。
@@ -279,10 +309,13 @@ curl -N -X POST http://localhost:8080/api/chat/stream \
 
 ```json
 [{"node":"分诊","detail":"知识问答","costMs":0},
+ {"node":"风险回溯","detail":"近 24 小时无高风险","costMs":2},
  {"node":"知识检索","detail":"3 条：入睡困难与睡眠维持","costMs":7}]
 ```
 
-`hitl = true` 表示已标记人工复核，前端会同时展示危机干预提示。
+`hitl = true` 表示已标记人工复核：除了前端展示危机提示，还会在 `t_review_task` 建一张工单，
+`source` 区分是规则命中（`RULE`）还是模型评估兜住（`MODEL`）。
+只记日志不建单的 HITL 是没有闭环的——刷新页面就没了，也没人知道该跟进谁。
 
 ### 工具编排
 
@@ -433,19 +466,25 @@ curl -s http://localhost:8080/mcp \
 ### 评测与压测
 
 ```bash
+python eval/api_test.py  --base-url http://localhost:8080
 python eval/run_eval.py   --base-url http://localhost:8080
 python eval/load_test.py  --base-url http://localhost:8080 --users 20 --per-user 3 --concurrency 10
 ```
 
-- `eval/cases.json`：13 条对话用例 + 4 项 MCP 协议检查。断言只检查结构化契约
-  （route / steps / tools / citations / hitl / traceId / ttftMs），不比对模型措辞，换模型后结论稳定。
-- `eval/run_eval.py`：注册临时账号轮换调用，规避单人限流；输出 `eval/reports/eval-report.md`。
+两个脚本验的东西不同，都要跑：
+
+- `eval/api_test.py`：**接口契约与边界**——鉴权、参数校验、会话归属、错误码、幂等、限流、
+  traceId 重试可观测性、复核工单状态机、会话级风险回溯，共 67 项断言，不依赖模型措辞。
+- `eval/cases.json` + `eval/run_eval.py`：**产品行为**——13 条对话用例 + 4 项 MCP 协议检查，
+  断言只检查结构化契约（route / steps / tools / citations / hitl / traceId / ttftMs），换模型后结论稳定。
 - `eval/load_test.py`：并发压测完整链路（鉴权 → 编排 → 检索/工具 → 模型 → 落库 → 观测写入），
   输出吞吐与延迟分位数到 `eval/reports/load-report.md`。
 
-本机实测（JDK 17 / MySQL 8 / Redis 8，真实模型接入）：评测 **17/17 通过**；
-压测 **60/60 成功**，吞吐 **4.69 req/s**，首字延迟 p50 **464ms**、p95 **855ms**。
-原始报告见 `eval/reports/`。
+本机实测（JDK 17 / MySQL 8 / Redis 8，真实模型接入）：
+接口 **67/67**、评测 **17/17**、压测 **60/60**，吞吐 **6.02 req/s**，
+首字延迟 p50 **303ms**、p95 **522ms**。原始报告见 `eval/reports/`。
+
+首字延迟比上一版下降，是因为情绪路径不再检索：少一次查询，也少一段会误导模型的参考资料。
 
 ## 配置项
 
@@ -461,6 +500,8 @@ python eval/load_test.py  --base-url http://localhost:8080 --users 20 --per-user
 | `psy.jwt.secret` | 令牌签名密钥（HS256，至少 32 字节），生产环境通过 `PSY_JWT_SECRET` 注入 | 开发默认值 |
 | `psy.jwt.expiration` | 令牌有效期 | `2h` |
 | `psy.mcp.access-token` | MCP 端点访问令牌，生产环境通过 `PSY_MCP_TOKEN` 注入 | 开发默认值 |
+| `psy.review.admin-usernames` | 可访问复核队列的用户名，逗号分隔；为空时**拒绝所有访问** | `leo_test` |
+| `psy.risk.lookback-hours` | 风险回溯的时间窗（小时） | `24` |
 | `psy.alert.mail.enabled` | 是否启用邮件告警通道；关闭时只写结构化日志 | `false` |
 | `psy.alert.mail.to` / `from` / `host` / `port` | 告警邮件收件人与 SMTP 连接 | — |
 | `spring.datasource.*` | 数据库连接 | — |
@@ -488,6 +529,8 @@ python eval/load_test.py  --base-url http://localhost:8080 --users 20 --per-user
 - [x] 多智能体编排（分诊 / 检索 / 危机干预）
 - [x] 工具服务与 MCP 接入（量表 / 预约 / 统计 / 告警）
 - [x] 可观测性（traceId / 轨迹落库 / 看板）与效果评测、并发压测
+- [x] 人工复核工单：状态机、响应时限与逾期统计
+- [x] 输出校验（引用越界）与会话级风险回溯
 
 ## License
 

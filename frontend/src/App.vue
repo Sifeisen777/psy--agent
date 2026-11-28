@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import ChatView from './views/ChatView.vue'
 import MetricsView from './views/MetricsView.vue'
+import ReviewView from './views/ReviewView.vue'
 import {
   clearAuth,
   getToken,
@@ -66,8 +67,10 @@ function logout() {
     :username="getUsername()"
     @logout="logout"
     @open-metrics="view = 'metrics'"
+    @open-review="view = 'review'"
   />
-  <MetricsView v-else-if="authed" @back="view = 'chat'" @logout="logout" />
+  <MetricsView v-else-if="authed && view === 'metrics'" @back="view = 'chat'" @logout="logout" />
+  <ReviewView v-else-if="authed" @back="view = 'chat'" @logout="logout" />
 
   <div v-else class="entry">
     <div class="card">

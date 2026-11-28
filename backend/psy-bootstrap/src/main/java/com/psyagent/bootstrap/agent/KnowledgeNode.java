@@ -13,8 +13,9 @@ import java.util.List;
 /**
  * 知识检索节点。
  * <p>
- * 只在非危机场景下运行。危机场景刻意跳过检索：这时候用户需要的是一句直接的关心和一个电话，
- * 不是一篇关于失眠成因的科普。给得越多，越像在回避。
+ * 只在 KNOWLEDGE 路由下运行，其余三类都刻意跳过：危机路径用户需要一句关心和一个电话，
+ * 不是一篇关于失眠成因的科普；寒暄没有可检索的内容；情绪倾诉一旦掺进资料编号，
+ * 第一句就不再是"我听见你了"，而变成了"这是第 3 条建议"。
  */
 @Component
 @Order(20)
@@ -38,11 +39,12 @@ public class KnowledgeNode implements AgentNode {
 
     @Override
     public boolean supports(AgentContext context) {
-        // 危机：用户此刻需要的是一个电话，不是科普；
-        // 寒暄：检索必然无匹配，白跑一次查询还会在轨迹里留下噪音
-        return enabled
-                && context.getRoute() != AgentRoute.CRISIS
-                && context.getRoute() != AgentRoute.SMALLTALK;
+        // 只在"用户在问方法"时检索。三条排除的理由各不相同：
+        // 危机——此刻需要的是一个电话，不是科普；
+        // 寒暄——必然无匹配，白跑一次查询还留下噪音；
+        // 情绪——检索结果会诱导模型在共情里插资料编号，而情绪支持的第一句必须是回应感受。
+        //        这是评测暴露出来的：曾经情绪路径也检索，模型就开始标 [1] 了。
+        return enabled && context.getRoute() == AgentRoute.KNOWLEDGE;
     }
 
     @Override
